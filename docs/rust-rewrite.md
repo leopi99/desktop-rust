@@ -281,7 +281,7 @@ history navigation QA remains outstanding.
 
 ## UI transition modules
 
-`crates/ui/src/update/mod.rs` exhaustively routes the application's 74 message
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 76 message
 variants to typed events in ten domain handlers: application/navigation,
 repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
 stashes and completion/refresh. Guard failures explicitly match the relevant
@@ -393,6 +393,21 @@ up to 64 KiB, while the freshness check covers the full file up to 8 MiB. Marker
 checks include start/separator/end lines and diff3 base lines, using the effective
 `conflict-marker-size` attribute. Marker-like lines are treated conservatively;
 files containing intentional marker examples may require staging with Git instead.
+
+Preview ours / Preview theirs reads the immutable stage-2/stage-3 blob for a
+still-unmerged regular-file path. A missing side is shown as deletion; blobs with
+NUL bytes show size only, while other contents use a lossy UTF-8 text prefix up to
+64 KiB of raw bytes. Complete blob reads are capped at 8 MiB and index-side
+metadata at 64 KiB, using the shared Unix read deadline/output policy. Symlink,
+submodule and ambiguous renamed conflict sides remain unsupported.
+
+Git stage semantics are retained: during rebase, ours is the rebased-onto side and
+theirs is the replayed commit. Previews show the full blob ID and executable flag,
+recheck index/HEAD/status after reading, and clear the old resolution review.
+They are read-only, do not bind the current working-file contents, and cannot be
+used to apply a choice or enable Mark resolved. Choosing and confirming a side
+for overwrite/deletion is still pending G-05 work; external text/deletion review
+continues to use its separate existing workflow below.
 
 Mark reviewed file resolved stages only that file after rechecking its contents,
 executable mode, index, HEAD and marker settings. Locally deleted files can be

@@ -5,7 +5,7 @@ Updated: 2026-11-24. This is a partial source inventory for U-01. The complete
 baseline remains pending-analysis; analyzed/parity checkpoints stay unset.
 The separate [release interval triage](release-3.6.11.md) remains valid.
 
-## Scope of this pass
+## Scope of the initial pass
 
 Five upstream files were read in full at the pinned commit: initialization helper,
 default-branch helper, initialization unit tests, manual conflict router and its
@@ -77,6 +77,34 @@ Observed gap **G-05**: complete the delegated-helper/caller/test review, then ad
 reviewed manual side selection with stale-state and user-data protections.
 This is a behavior gap to design and test, not permission for implicit overwrites.
 
+## G-05 follow-up: delegated behavior and read-only preview phase
+
+Additional source excerpts inspected at the same pinned upstream commit:
+[checkoutConflictedFile](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/checkout.ts),
+[addConflictedFile](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/add.ts),
+[removeConflictedFile](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/rm.ts),
+[merge-commit caller](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/commit.ts),
+[rebase continuation caller](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/rebase.ts),
+and relevant [resolution-diff test excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/test/unit/git/diff-stage-test.ts).
+These are focused helper/caller/test inspections, not whole-file audits of the
+larger checkout, commit, rebase or app-store modules.
+
+The helpers use literal `checkout --ours/--theirs -- path`, `add -- path` and
+`rm -- path`. Manual choices are applied by merge-commit/rebase-continuation
+callers before staging other files. The inspected diff tests exercise both index
+sides and missing/deleted sides. This does not yet establish the complete binary,
+add/add, rename, recovery or external-edit contract.
+
+Rust [c0fcf39b95](https://github.com/leopi99/desktop-rust/commit/c0fcf39b9565013f925603f604d614cfe4dabca1) introduces only the read-only preview foundation:
+validated native unmerged index records, full blob IDs/modes, bounded blob reads,
+text/NUL-binary/deletion display, post-read freshness and a UI without write
+authority. Tests verify preserved user/index state, resource limits and stale/busy
+cases. It is a raw side-content preview, not upstream's working-file-to-side diff
+renderer. Applying explicit choices still needs a separate review binding the
+working contents, index, attributes/conversion policy and confirmation, plus the
+remaining status matrix and failure/recovery tests. G-05 remains in progress;
+feature and release parity checkpoints remain unchanged.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -85,7 +113,7 @@ Feature identifiers match `upstream/features.json`.
 | Feature IDs | Inventory state | Next evidence |
 | --- | --- | --- |
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
-| conflict-resolution | Partial router/enum inspection | Delegated helpers, binary/deletion/add-add matrix, callers, original tests. |
+| conflict-resolution | Partial router/helper/caller/test inspection; read-only preview phase implemented | Confirmed writes, full status matrix, conversion/external-edit safeguards, recovery and original tests. |
 | repository-read, diff, stage-commit, commit-history | Pending | Status/diff/index contracts, hunk selection, parsing, limits and original tests. |
 | branches, stash | Pending | Supported operations, worktrees, tracking, recovery, original tests. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |

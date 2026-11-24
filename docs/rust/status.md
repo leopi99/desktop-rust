@@ -64,6 +64,7 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - UI update separation in `2f79f69b3d`: 74 messages routed exhaustively to ten typed domain handlers, nine support methods moved with them, and shared completion/refresh handling retained.
 - Branch-form layout fix in `49a9de727e`, verified at the minimum and default window sizes.
 - First scoped upstream behavior port in `aa524c1101` (G-04): configured initial branch for blank input, explicit override and fail-closed preference lookup before initialization.
+- First G-05 phase in `c0fcf39b95`: bounded read-only previews of Git index stages 2/3 with raw blob IDs, text/binary/deletion display and native paths. These do not apply a resolution or provide a write token.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
@@ -86,7 +87,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 289 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 296 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -134,6 +135,15 @@ invalid/malformed/non-UTF-8/oversized settings and missing Git, with no global
 config writes or destination reservation in the exercised preflight failures. The updated Create/Clone
 panel was captured and visually inspected at 960×640; the temporary image is
 `/tmp/desktop-rust-preferred-branch-repository-960.png`.
+The first conflict-side phase passed 296 Rust tests (including 84 UI state tests),
+32 upstream tests and 10 policy tests, plus Clippy/rustfmt/rustdoc/npm lint.
+New cases cover both immutable sides, binary metadata, clipped/oversized blobs,
+modify/delete in both directions, literal/non-UTF-8 names, resolved status, busy
+UI behavior and absence of write authority. A real-conflict Changes capture at
+960×640 was visually inspected; refs/status/index/config/merge parent and working
+file remained unchanged. The temporary image is
+`/tmp/desktop-rust-conflict-side-controls-960.png`. Actual button-click and full
+interactive conflict-resolution QA remain pending.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.
