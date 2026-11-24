@@ -133,6 +133,10 @@ Their raw stdout limits are:
 | Complete staged-index entries | 16 MiB |
 | Local branch listing | 4 MiB |
 | HEAD/symbolic ref, repository root and merge/rebase metadata paths | 64 KiB each |
+| Remote names, tracking metadata and each fetch/push URL list | 64 KiB per read |
+| Stash list and each tracked/untracked stash path stream | 4 MiB each |
+| Complete tracked-path scan for stash collision checks | 16 MiB |
+| Branch rename local-config and worktree guards | 4 MiB each |
 
 On Unix each migrated subprocess has a 30-second deadline and a 16 KiB stderr cap,
 using managed process-group cleanup and joined readers. Windows validates these
@@ -149,8 +153,20 @@ sequential reads do not fence concurrent external clients.
 
 Regression fixtures exceed the index/status and branch-list caps, verify refused
 commit/staging with unchanged index/HEAD/working files, and exercise recovery after
-restoring only the disposable fixture. Auxiliary remote/stash/config/worktree
-reads and bespoke merge/rebase readers still require migration under R-05/R-06.
+restoring only the disposable fixture. The remote model accepts at most 64 remotes and 64 URLs per endpoint. New remote
+names/URLs are checked against the known metadata budgets before a write; external
+configuration and Git URL rewriting can still cause later reads to be rejected.
+Stash restore reviews at most 10,000 path records across the two path streams and
+loads the full tracked-path set once. Third-parent lookup failures propagate;
+only the selected quiet absence result can mean no saved untracked tree.
+
+Auxiliary regressions exercise excessive remote/URL counts, oversized endpoint,
+stash and local-config output, and stash collision review above 10,000 paths.
+They verify rejected writes, retained config/index/working data/stashes and recovery.
+These are per-subprocess byte/deadline limits and a bounded review count, not one
+operation-wide deadline; filesystem collision checks have no separate deadline.
+Conflict-index queries, initialization detection, remaining rebase queries and
+bespoke merge/rebase readers still require migration under R-05/R-06.
 
 ## Git pipe-reader lifecycle
 
