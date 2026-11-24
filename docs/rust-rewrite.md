@@ -34,6 +34,39 @@ automatic stash or remote branch guessing is used. Before the first commit,
 create-and-switch sets the initial branch name; no branch ref exists until commit.
 Commit drafts survive branch changes; a failed creation also retains the branch name.
 
+## Rename the current branch
+
+In Branches, enter a new name in New name for the current branch and choose
+Rename current branch. This renames only the observed, committed local branch;
+Git moves its reflog and local branch configuration. The commit ID, staged and
+unstaged changes and untracked files are preserved. Tracking keeps its existing
+remote destination: the remote branch is not renamed or deleted, and no network
+request is made. Refresh then shows the new name and updated branch list.
+
+The action rejects detached/unborn HEAD, active merge/rebase/cherry-pick/revert
+operations, changed index/HEAD/branch observations, occupied or invalid names,
+and destinations with an existing local branch configuration section. A branch
+also checked out in another worktree is rejected; renaming a branch used only by
+the current linked worktree is supported. Git uses its mandatory ref locks, with
+no forced overwrite. Preflight checks do not fence concurrent external clients;
+if Git fails after changing a ref, refresh shows the actual resulting state.
+
+The rename field is separate from branch creation. Failures retain it, successful
+renames clear only that field, and changing repositories clears it. Commit and
+branch-creation drafts survive the rename. Integration tests cover tracking,
+reflog, index/file preservation, stale observations, destination collisions,
+sequencer state, linked worktrees and native non-UTF-8 source names on Unix.
+
+This is a prototype under the existing `branches` feature in the upstream ledger.
+Renaming a different selected branch, deleting branches and case-only renames
+requiring a forced retry remain planned. The reference implementation in
+`app/src/lib/git/branch.ts` supports a wider scope; this increment does not claim
+complete branch parity or advance release checkpoints. The input accepts a UTF-8
+new name, while an existing source name retains its native filesystem encoding.
+The updated resting Branches panel has been captured and visually inspected on
+Linux with the software renderer at 960×640 and 1200×800. Interactive keyboard
+and end-to-end UI rename checks remain outstanding.
+
 ## Commit history
 
 Switch between Changes and History to inspect commits without checking them out.
@@ -49,7 +82,8 @@ textconv helpers are disabled. Commit message previews are limited to 64 KiB and
 committed diff previews to 256 KiB. These are display limits; Git output is currently
 read into memory before preview truncation. Large-repository virtualization and
 streamed historical diffs remain planned. Commit controls are hidden in History;
-switch to Changes to prepare a new commit. Visual QA remains outstanding.
+switch to Changes to prepare a new commit. Resting layouts have been visually
+checked; interactive history navigation QA remains outstanding.
 
 ## Development checks
 
@@ -348,7 +382,8 @@ if unattended availability is required.
 The preview now supports local initialization, stage/unstage, commit, and branch
 creation/switching.
 Clone, fetch, fast-forward pull, push and upstream setup are implemented as a
-prototype. Branch deletion/rename and in-app authentication remain planned.
+prototype. Renaming the current committed branch is supported locally; branch
+deletion, renaming other selected branches and in-app authentication remain planned.
 Diff rendering is plain monospaced text; syntax highlighting, hunk selection,
 large-diff virtualization and interactive conflict resolution remain planned.
 Automated Git integration tests cover staged/unstaged changes, unborn branches,
