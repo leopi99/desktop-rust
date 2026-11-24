@@ -1,0 +1,27 @@
+{
+  "commit": "892aa306275cfe4e7fb3b4aac39e9d59303452f7",
+  "rust_tests_passed": 233,
+  "upstream_tests_passed": 32,
+  "fmt": "passed",
+  "clippy": "passed with -D warnings",
+  "npm_lint": "passed",
+  "visual_checks": {
+    "platform": "Linux",
+    "renderer": "tiny-skia",
+    "sizes": [
+      "960x640",
+      "1200x800"
+    ],
+    "states": [
+      "Git available",
+      "Git missing"
+    ],
+    "fixture_unchanged": true
+  },
+  "limitations": [
+    "no version/capability gate",
+    "no bundled Git update",
+    "no full initial baseline inventory",
+    "interactive keyboard and accessibility remain unverified"
+  ]
+}

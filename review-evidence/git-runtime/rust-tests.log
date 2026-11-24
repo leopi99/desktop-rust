@@ -1,0 +1,326 @@
+   Compiling desktop-git v0.1.0 (<workspace>/crates/git)
+   Compiling desktop-rust v0.1.0 (<workspace>/crates/ui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.90s
+     Running unittests src/lib.rs (target/debug/build/desktop-core/b6ffbf625f1c2339/out/desktop_core-b6ffbf625f1c2339)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/build/desktop-git/b578e0546b98f9ac/out/desktop_git-b578e0546b98f9ac)
+
+running 10 tests
+test runtime::tests::preserves_vendor_prerelease_and_development_versions_without_guessing_compatibility ... ok
+test runtime::tests::rejects_malformed_multiline_non_utf8_and_oversized_reports ... ok
+test transfer::tests::cancellation_also_interrupts_waiting_for_the_write_lock ... ok
+test runtime::tests::missing_executable_reports_an_actionable_error ... ok
+test transfer::tests::progress_keeps_valid_utf8_at_the_size_boundary ... ok
+test runtime::tests::installed_git_can_be_inspected_without_a_repository_path ... ok
+test runtime::tests::a_failing_version_command_reports_its_error ... ok
+test transfer::tests::output_is_bounded_and_both_pipes_are_drained ... ok
+test transfer::tests::cancellation_stops_git_and_its_sleeping_helper ... ok
+test transfer::tests::deadline_stops_stalled_transfer ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/branch_delete.rs (target/debug/build/desktop-git/35736447aa00bbb6/out/branch_delete-35736447aa00bbb6)
+
+running 10 tests
+test native_non_utf8_target_name_is_deleted_without_lossy_conversion ... ok
+test current_branch_cannot_be_deleted_even_with_a_forged_current_flag ... ok
+test branch_in_a_linked_worktree_is_not_deleted ... ok
+test upstream_containing_the_tip_does_not_allow_unmerged_current_history_to_be_deleted ... ok
+test merged_branch_deletion_preserves_files_index_head_and_remote_tracking_ref ... ok
+test git_upstream_merge_check_is_never_forced_even_when_current_head_contains_tip ... ok
+test detached_and_unborn_head_do_not_allow_deletion ... ok
+test moved_or_removed_target_is_not_deleted_from_a_stale_selection ... ok
+test changed_index_head_and_branch_block_deletion ... ok
+test active_git_operations_block_deletion ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
+     Running tests/branch_rename.rs (target/debug/build/desktop-git/2a103c7e644d2fd7/out/branch_rename-2a103c7e644d2fd7)
+
+running 10 tests
+test non_utf8_source_branch_is_renamed_using_its_native_name ... ok
+test destination_prefix_does_not_match_another_branch_configuration ... ok
+test orphan_destination_configuration_is_not_merged_or_overwritten ... ok
+test linked_worktree_can_rename_its_own_branch_without_changing_main_head ... ok
+test branch_shared_with_another_worktree_is_not_renamed ... ok
+test unborn_and_detached_head_are_rejected ... ok
+test rename_preserves_dirty_files_index_tracking_reflog_and_remote_refs ... ok
+test occupied_invalid_and_same_names_never_overwrite_refs_or_config ... ok
+test changed_index_head_or_branch_requires_a_new_observation ... ok
+test active_merge_rebase_cherry_pick_and_revert_metadata_block_rename ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+
+     Running tests/conflicts.rs (target/debug/build/desktop-git/cfb30ef87638020f/out/conflicts-cfb30ef87638020f)
+
+running 10 tests
+test symlink_content_is_never_read_during_conflict_review ... ok
+test executable_mode_changes_invalidate_the_review ... ok
+test binary_and_oversized_conflicts_require_external_git_resolution ... ok
+test literal_pathspec_and_newline_names_resolve_only_the_selected_path ... ok
+test reviewed_deletion_stages_only_the_deletion ... ok
+test markers_block_resolution_without_changing_index_or_working_file ... ok
+test custom_marker_size_and_diff3_base_markers_are_checked ... ok
+test resolved_entry_cannot_be_marked_resolved_again ... ok
+test reviewed_text_resolution_can_complete_a_merge_commit ... ok
+test file_index_and_head_changes_require_a_new_review ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.47s
+
+     Running tests/history.rs (target/debug/build/desktop-git/0cc2d7d7dd79039d/out/history-0cc2d7d7dd79039d)
+
+running 10 tests
+test invalid_ids_and_paths_not_in_commit_are_rejected ... ok
+test deletion_and_binary_patches_are_available_with_helpers_disabled ... ok
+test large_messages_and_committed_diffs_have_bounded_previews ... ok
+test non_utf8_committed_paths_are_not_lossily_reconstructed ... ok
+test notes_color_and_format_configuration_do_not_corrupt_history_records ... ok
+test merge_file_list_compares_with_first_parent ... ok
+test rename_and_newline_paths_keep_both_names ... ok
+test literal_committed_diff_does_not_show_other_files_or_current_working_changes ... ok
+test root_commit_metadata_message_and_diff_are_read_without_mutation ... ok
+test paging_uses_the_original_tip_even_after_head_advances ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/initialization.rs (target/debug/build/desktop-git/1a3eb6c69aade0b8/out/initialization-1a3eb6c69aade0b8)
+
+running 9 tests
+test malformed_gitfile_blocks_initialization_without_overwrite ... ok
+test existing_bare_repository_is_not_reinitialized ... ok
+test symlink_destinations_and_broken_git_markers_are_rejected ... ok
+test files_missing_parents_and_empty_destinations_are_rejected ... ok
+test existing_repositories_and_nested_destinations_are_rejected ... ok
+test invalid_names_do_not_create_directories_or_metadata ... ok
+test existing_project_files_are_untouched_and_unstaged ... ok
+test inherited_git_environment_cannot_redirect_initialization ... ok
+test new_repository_supports_the_complete_first_commit_flow ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/merge.rs (target/debug/build/desktop-git/8ee9d92888b52a01/out/merge-8ee9d92888b52a01)
+
+running 15 tests
+test configured_ours_strategy_cannot_replace_the_previewed_merge_result ... ok
+test conflict_preview_preserves_newlines_and_literal_pathspec_names ... ok
+test unrelated_histories_are_not_merged ... ok
+test explicit_merge_flags_override_squash_no_ff_and_autostash_defaults ... ok
+test ignored_local_files_cannot_be_overwritten_by_fast_forward ... ok
+test resolved_but_unfinished_cherry_pick_blocks_starting_a_merge ... ok
+test conflicts_are_predicted_and_can_be_resolved_before_merge_commit ... ok
+test identical_tree_divergence_can_complete_an_empty_merge_commit ... ok
+test stale_abort_basis_does_not_discard_newly_staged_work ... ok
+test linked_worktree_merge_metadata_is_isolated_from_main_worktree ... ok
+test abort_discards_merge_result_but_keeps_untracked_files_and_saved_stashes ... ok
+test divergent_clean_merge_stops_for_review_and_creates_two_parent_commit ... ok
+test dirty_worktree_and_stale_source_or_target_prevent_merge ... ok
+test up_to_date_and_fast_forward_previews_preserve_repository_until_execution ... ok
+test existing_merge_blocks_new_merge_stash_and_branch_switching ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.47s
+
+     Running tests/rebase.rs (target/debug/build/desktop-git/b325b70be6efd6db/out/rebase-b325b70be6efd6db)
+
+running 14 tests
+test commits_that_become_empty_are_kept_in_the_replayed_history ... ok
+test ignored_collisions_in_intermediate_replayed_commits_are_not_missed ... ok
+test ignored_file_collision_stops_rebase_before_checkout ... ok
+test custom_todo_commands_are_not_executed_by_continue ... ok
+test configured_autosquash_backend_and_update_refs_do_not_change_reviewed_policy ... ok
+test original_branch_movement_blocks_continue_and_abort ... ok
+test source_merge_commits_and_unrelated_histories_are_not_flattened ... ok
+test preview_is_read_only_and_linear_commits_are_replayed_on_reviewed_target ... ok
+test up_to_date_and_fast_forward_cases_do_not_rewrite_local_commits ... ok
+test linked_worktree_rebase_state_is_isolated_and_survives_reload ... ok
+test abort_restores_original_branch_and_preserves_unrelated_untracked_files ... ok
+test conflicted_rebase_can_be_reviewed_resolved_and_continued_with_original_message ... ok
+test ignored_file_created_while_paused_blocks_continue_until_moved_aside ... ok
+test stale_source_target_and_sequencer_state_are_rejected ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+
+     Running tests/remote_settings.rs (target/debug/build/desktop-git/872cda36c9c2eab5/out/remote_settings-872cda36c9c2eab5)
+
+running 10 tests
+test remote_add_never_fetches_or_changes_the_index ... ok
+test existing_non_utf8_remote_names_can_be_edited_and_removed ... ok
+test stale_remote_cannot_be_edited_or_removed ... ok
+test ssh_ipv6_and_paths_with_spaces_are_preserved_without_connection ... ok
+test duplicate_or_invalid_remote_names_leave_configuration_unchanged ... ok
+test multi_url_endpoints_are_rejected_without_partial_edits ... ok
+test fetch_url_change_updates_fallback_push_but_preserves_explicit_push_url ... ok
+test newly_created_project_can_be_connected_and_published ... ok
+test invalid_urls_never_change_configuration ... ok
+test removing_remote_keeps_local_branches_index_files_and_server ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
+
+     Running tests/repository.rs (target/debug/build/desktop-git/90a98822b84dd68a/out/repository-90a98822b84dd68a)
+
+running 41 tests
+test pre_cancelled_clone_never_creates_destination ... ok
+test non_utf8_paths_are_preserved ... ok
+test literal_pathspec_cannot_select_another_file ... ok
+test deletion_and_binary_diff_do_not_use_external_helpers ... ok
+test branch_list_and_switch_preserve_non_utf8_names ... ok
+test reads_empty_repository_without_changing_working_tree ... ok
+test failing_hook_preserves_index_and_returns_diagnostic ... ok
+test rejects_a_non_repository ... ok
+test commit_rejects_branch_switch_with_same_index ... ok
+test commit_uses_index_only_and_supports_multiline_messages ... ok
+test reads_conflicted_file_and_resolves_subdirectory_root ... ok
+test local_branch_wins_over_identically_named_tag ... ok
+test selection_must_still_be_in_status ... ok
+test rename_keeps_both_paths_and_diff ... ok
+test shows_unborn_index_and_untracked_binary ... ok
+test separates_staged_and_unstaged_changes ... ok
+test creates_and_switches_local_branches ... ok
+test non_utf8_branch_changes_invalidate_the_commit_basis ... ok
+test commit_rejects_empty_message_empty_index_and_stale_index ... ok
+test compatible_dirty_index_is_preserved_when_creating_and_switching ... ok
+test creates_initial_branch_and_recovers_detached_head ... ok
+test untracked_symlink_is_not_followed ... ok
+test stage_and_unstage_unborn_file_preserve_working_contents ... ok
+test stage_is_literal_and_rejects_stale_status ... ok
+test switching_respects_linked_worktree_exclusivity ... ok
+test stage_deletion_and_unstage_rename_preserve_worktree ... ok
+test switching_rejects_overwriting_local_changes ... ok
+test switching_rejects_overwriting_untracked_files ... ok
+test stale_source_or_target_does_not_switch ... ok
+test missing_remote_returns_an_error_without_changing_local_contents ... ok
+test branch_validation_rejects_options_shorthand_and_existing_names ... ok
+test pull_rejects_overwriting_local_changes_even_with_autostash_configured ... ok
+test clone_and_fetch_only_update_remote_refs ... ok
+test rejected_push_does_not_force_remote_or_change_local_index ... ok
+test push_sends_only_current_branch_even_with_mirror_and_tag_configuration ... ok
+test clone_refuses_existing_destinations_and_invalid_transports ... ok
+test publishing_branch_sets_upstream_and_honors_differently_named_upstream ... ok
+test remote_tracking_on_another_remote_disables_pull_and_push ... ok
+test stale_remote_or_source_basis_is_rejected_before_transfer ... ok
+test detached_head_can_fetch_but_cannot_pull_or_push ... ok
+test pull_fast_forwards_but_never_merges_diverged_history ... ok
+
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+
+     Running tests/stash.rs (target/debug/build/desktop-git/8eaa1d6408f953a9/out/stash-8eaa1d6408f953a9)
+
+running 12 tests
+test external_stash_with_untracked_files_is_restored_and_retained ... ok
+test external_untracked_stash_cannot_overwrite_an_ignored_file ... ok
+test unicode_multiline_stash_messages_remain_a_single_entry ... ok
+test ignored_file_collision_is_detected_before_restoring_tracked_additions ... ok
+test restore_never_traverses_an_ignored_symlink_directory ... ok
+test conflicting_restore_keeps_the_stash_available_for_recovery ... ok
+test restore_rejects_dirty_and_untracked_working_trees ... ok
+test saving_and_restoring_preserves_staged_unstaged_and_new_file_boundaries ... ok
+test restoring_uses_object_identity_when_a_new_stash_shifts_the_reflog ... ok
+test save_rejects_unborn_clean_and_untracked_only_repositories ... ok
+test stale_source_or_removed_entry_is_rejected_without_changes ... ok
+test stash_conflict_can_be_reviewed_resolved_and_committed_without_dropping_stash ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+     Running unittests src/main.rs (target/debug/build/desktop-rust/d70da3b51f18b19f/out/desktop_rust-d70da3b51f18b19f)
+
+running 82 tests
+test capture::tests::help_does_not_launch ... ok
+test capture::tests::existing_capture_destination_is_rejected ... ok
+test capture::tests::rejects_invalid_launch_options ... ok
+test capture::tests::parses_panel_size_and_native_repository_path ... ok
+test tests::abort_rebase_requires_confirmation_and_can_be_cancelled ... ok
+test tests::abort_requires_confirmation_and_can_be_cancelled ... ok
+test tests::busy_operation_cannot_change_repository_or_draft ... ok
+test tests::busy_operation_cannot_resolve_a_reviewed_conflict ... ok
+test tests::busy_operation_ignores_history_navigation_and_selection ... ok
+test tests::busy_operation_ignores_branch_edits_and_actions ... ok
+test tests::adding_remote_selects_it_after_refresh_and_clears_the_form ... ok
+test tests::busy_operation_ignores_initialization_form_and_submission ... ok
+test tests::busy_operation_keeps_the_current_panel ... ok
+test tests::busy_operation_ignores_remote_settings_edits_and_actions ... ok
+test tests::busy_operations_ignore_rebase_actions ... ok
+test tests::busy_operations_ignore_stash_edits_and_actions ... ok
+test tests::busy_operations_ignore_merge_and_abort_actions ... ok
+test tests::busy_remote_action_cannot_be_redirected_or_repeated ... ok
+test tests::busy_ui_cannot_confirm_or_repeat_branch_deletion ... ok
+test tests::cancel_keeps_ui_busy_until_the_process_result_arrives ... ok
+test tests::changed_remote_endpoint_requires_new_selection_after_refresh ... ok
+test tests::changed_selection_cannot_reuse_a_reviewed_branch_even_without_navigation ... ok
+test tests::changing_repository_clears_merge_preview_and_abort_confirmation ... ok
+test tests::cancelled_clone_preserves_inputs_and_the_previous_repository ... ok
+test tests::changing_repository_invalidates_conflict_review ... ok
+test tests::changing_repository_clears_rebase_preview_and_abort_confirmation ... ok
+test tests::changing_repository_invalidates_stash_selection_and_draft ... ok
+test tests::cleaned_review_can_be_staged_and_is_invalidated_after_completion ... ok
+test tests::clone_success_opens_new_repository_and_clears_old_selections ... ok
+test tests::deletion_requires_a_current_confirmation_and_cancel_revokes_it ... ok
+test tests::failed_commit_load_clears_old_files_without_discarding_the_history ... ok
+test tests::conflict_preview_is_bounded_without_losing_the_full_reviewed_content ... ok
+test tests::conflicted_operation_returns_to_changes_without_discarding_drafts ... ok
+test tests::clone_failure_preserves_open_repository_and_clone_inputs ... ok
+test tests::failed_rename_preserves_drafts_and_refreshes_on_the_branches_panel ... ok
+test tests::failed_stash_save_keeps_both_user_drafts ... ok
+test tests::failed_older_page_preserves_entries_and_allows_retry ... ok
+test tests::failed_branch_creation_preserves_both_drafts ... ok
+test tests::merge_failure_clears_preview_and_preserves_user_commit_draft ... ok
+test tests::failed_commit_preserves_draft_and_refreshes ... ok
+test tests::failed_stash_restore_keeps_the_saved_entry_visible_after_refresh ... ok
+test tests::failed_conflict_review_does_not_leave_an_older_review_actionable ... ok
+test tests::failed_initialization_preserves_form_and_open_repository ... ok
+test tests::empty_initialization_destination_does_not_start_a_worker ... ok
+test tests::deletion_failure_refreshes_without_clearing_other_drafts_or_reusing_confirmation ... ok
+test tests::editing_repository_path_invalidates_write_target ... ok
+test tests::current_unborn_detached_and_active_branch_states_cannot_request_deletion ... ok
+test tests::failed_url_save_preserves_the_edit_and_commit_drafts_after_refresh ... ok
+test tests::merge_preview_explains_conflicts_without_starting_the_merge ... ok
+test tests::history_navigation_preserves_drafts_and_invalidates_hidden_write_previews ... ok
+test tests::path_edit_clears_branch_selection_and_prevents_branch_writes ... ok
+test tests::pending_rebase_uses_continue_instead_of_the_regular_commit_action ... ok
+test tests::panel_navigation_preserves_drafts_and_revokes_hidden_confirmations ... ok
+test tests::rebase_preview_lists_rewritten_commits_without_starting_the_operation ... ok
+test tests::refresh_preserves_history_panel_and_drafts ... ok
+test tests::rejected_resolution_requires_review_again_and_keeps_commit_draft ... ok
+test tests::remote_failure_preserves_commit_draft_and_refreshes ... ok
+test tests::older_page_appends_without_moving_the_anchor ... ok
+test tests::remote_removal_requires_current_confirmation ... ok
+test tests::removed_remote_is_no_longer_available_for_push ... ok
+test tests::initialized_repository_opens_and_clears_old_write_targets ... ok
+test tests::merge_message_prefills_only_an_empty_commit_draft ... ok
+test tests::late_progress_from_a_finished_transfer_is_ignored ... ok
+test tests::removed_stash_is_deselected_after_refresh ... ok
+test tests::history_refresh_reanchors_the_list_and_invalidates_selected_commit ... ok
+test tests::repository_edit_clears_remote_settings_and_drafts ... ok
+test tests::repository_change_clears_history_cursor_and_prevents_stale_selection ... ok
+test tests::repository_edit_invalidates_selected_remote ... ok
+test tests::runtime_failure_does_not_discard_repository_or_drafts_and_allows_retry ... ok
+test tests::runtime_check_is_read_only_and_does_not_lock_repository_navigation ... ok
+test tests::runtime_result_does_not_complete_or_redirect_an_active_repository_write ... ok
+test tests::selecting_a_remote_loads_its_urls_and_cancels_pending_removal ... ok
+test tests::selecting_another_branch_invalidates_the_merge_preview ... ok
+test tests::successful_branch_creation_clears_only_branch_name ... ok
+test tests::selection_navigation_and_refresh_revoke_branch_deletion_confirmation ... ok
+test tests::successful_commit_clears_draft_even_if_refresh_fails ... ok
+test tests::successful_rename_clears_only_its_draft_and_old_write_previews ... ok
+test tests::successful_stash_save_clears_its_note_but_preserves_commit_draft ... ok
+test tests::successful_url_save_selects_the_new_endpoint_after_refresh ... ok
+test tests::unborn_detached_and_active_operations_cannot_start_a_rename ... ok
+test tests::unsupported_rebase_cannot_be_continued_or_aborted_from_ui ... ok
+test tests::unresolved_markers_block_the_resolve_action ... ok
+
+test result: ok. 82 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests desktop_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests desktop_git
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
