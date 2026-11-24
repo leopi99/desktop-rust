@@ -360,6 +360,7 @@ fn side_policy(root: &Path, path: &Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
 
 /// Review an explicit side replacement/deletion without writing. Only regular
 /// files up to 8 MiB and paths without checkout conversions are supported.
+/// Only UU, AA, UD and DU statuses support side writes. AU/UA/DD require Git.
 /// Externally resolved marker-free UU/AA text must use ordinary conflict review.
 ///
 /// # Errors
@@ -371,6 +372,14 @@ pub fn review_conflict_side_resolution(
     selected: &FileChange,
     side: ConflictSide,
 ) -> io::Result<ConflictSideResolutionReview> {
+    if !matches!(
+        (selected.index, selected.worktree),
+        ('U', 'U') | ('A', 'A') | ('U', 'D') | ('D', 'U')
+    ) {
+        return Err(io::Error::other(
+            "Use Git for added-by-one-side, both-deleted or coordinated rename conflicts; an absent index side alone does not authorize deletion",
+        ));
+    }
     let preview = inspect_conflict_side(path, selected, side)?;
     let root = &preview.repository.path;
     let basis = super::commit_basis(root)?;
@@ -436,6 +445,21 @@ pub fn apply_conflict_side_resolution(review: &ConflictSideResolutionReview) -> 
             "File, index, HEAD, attributes or side changed; review again before applying",
         ));
     }
+    apply_reviewed_side(review).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "Side resolution failed; file/index may have changed, refresh and inspect: {error}"
+            ),
+        )
+    })
+}
+
+// Called only after freshness validation, while the caller holds WRITE_LOCK.
+// Every error here is potentially after a Git write, including failed reads.
+fn apply_reviewed_side(review: &ConflictSideResolutionReview) -> io::Result<String> {
+    let root = &review.preview.repository.path;
+    let selected = &review.preview.change;
     let result = if review.preview.oid.is_none() {
         run_write(
             root,
@@ -460,7 +484,7 @@ pub fn apply_conflict_side_resolution(review: &ConflictSideResolutionReview) -> 
                 selected.path.as_os_str(),
             ],
             None,
-        ).map_err(|error| io::Error::new(error.kind(), format!("Side checkout failed; working file may have changed, refresh and inspect: {error}")))?;
+        )?;
         let (attributes, settings) = side_policy(root, &selected.path)?;
         if super::commit_basis(root)? != review.basis
             || working_content(root, &selected.path)? != review.selected
@@ -481,14 +505,7 @@ pub fn apply_conflict_side_resolution(review: &ConflictSideResolutionReview) -> 
             None,
         )
     };
-    result.map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!(
-                "Side resolution failed; file/index may have changed, refresh and inspect: {error}"
-            ),
-        )
-    })?;
+    result?;
     let staged = super::read_output::complete(
         root,
         &[

@@ -40,6 +40,8 @@ impl Fixture {
             ("user.email", "test@example.invalid"),
             ("commit.gpgsign", "false"),
             ("core.hooksPath", "/dev/null"),
+            ("core.autocrlf", "false"),
+            ("core.attributesFile", "/dev/null"),
         ] {
             git(&repo, &["config", key, value]);
         }
@@ -660,4 +662,86 @@ fn noisy_driver_diagnostics_stay_bounded_while_rebase_pauses_and_aborts() {
     );
     assert_eq!(f.basis(), before);
     assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), b"local side\n");
+}
+
+#[test]
+fn confirmed_rebase_sides_keep_git_meaning_and_continue_on_the_original_branch() {
+    for (side, contents) in [
+        (
+            desktop_core::ConflictSide::Ours,
+            b"upstream side\n".as_slice(),
+        ),
+        (
+            desktop_core::ConflictSide::Theirs,
+            b"local side\n".as_slice(),
+        ),
+    ] {
+        let f = Fixture::new();
+        f.start_conflict();
+        f.write("untracked-note", b"keep this note");
+        let before = f.basis();
+        let state = desktop_git::snapshot(&f.repo).unwrap();
+        let change = state.changes.iter().find(|c| c.is_conflicted()).unwrap();
+        let review = desktop_git::review_conflict_side_resolution(&f.repo, change, side).unwrap();
+        desktop_git::apply_conflict_side_resolution(&review).unwrap();
+        let staged = f.basis();
+        assert_eq!(staged.head, before.head);
+        assert_eq!(staged.rebase, before.rebase);
+        assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), contents);
+        assert_eq!(git(&f.repo, &["show", ":base"]), contents);
+        desktop_git::continue_rebase(&f.repo, &staged).unwrap();
+        assert!(f.basis().rebase.is_none());
+        assert_eq!(
+            f.basis().branch.as_deref(),
+            Some(std::ffi::OsStr::new("refs/heads/main"))
+        );
+        assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), contents);
+        assert_eq!(
+            std::fs::read(f.repo.join("untracked-note")).unwrap(),
+            b"keep this note"
+        );
+        if side == desktop_core::ConflictSide::Ours {
+            // Choosing rebased-onto content removes the entire replayed patch.
+            assert_eq!(
+                git(&f.repo, &["rev-parse", "HEAD"]),
+                git(&f.repo, &["rev-parse", "upstream"])
+            );
+        } else {
+            assert_eq!(
+                git(&f.repo, &["log", "-1", "--format=%s"]),
+                b"local conflict commit\n"
+            );
+            assert_eq!(
+                git(&f.repo, &["rev-parse", "HEAD~1"]),
+                git(&f.repo, &["rev-parse", "upstream"])
+            );
+        }
+    }
+}
+
+#[test]
+fn abort_after_a_confirmed_rebase_choice_restores_original_history_and_invalidates_review() {
+    let f = Fixture::new();
+    f.conflict();
+    let original = f.basis();
+    desktop_git::execute_rebase(&f.preview()).unwrap();
+    let state = desktop_git::snapshot(&f.repo).unwrap();
+    let change = state.changes.iter().find(|c| c.is_conflicted()).unwrap();
+    let review = desktop_git::review_conflict_side_resolution(
+        &f.repo,
+        change,
+        desktop_core::ConflictSide::Ours,
+    )
+    .unwrap();
+    desktop_git::apply_conflict_side_resolution(&review).unwrap();
+    f.write("untracked-note", b"keep this note");
+    desktop_git::abort_rebase(&f.repo, &f.basis()).unwrap();
+    assert_eq!(f.basis(), original);
+    assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), b"local side\n");
+    assert!(desktop_git::apply_conflict_side_resolution(&review).is_err());
+    assert_eq!(f.basis(), original);
+    assert_eq!(
+        std::fs::read(f.repo.join("untracked-note")).unwrap(),
+        b"keep this note"
+    );
 }

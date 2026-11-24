@@ -427,7 +427,9 @@ fn validate_active(root: &Path, expected: &CommitBasis) -> io::Result<RebaseStat
     Ok(active.clone())
 }
 
-/// Continue after resolutions are staged, retaining original commit messages.
+/// Continue after resolutions are staged, retaining messages for replayed commits.
+/// A conflict resolved entirely to rebased-onto contents can leave no patch; Git
+/// may omit that commit rather than create an empty resolution commit.
 ///
 /// # Errors
 ///
