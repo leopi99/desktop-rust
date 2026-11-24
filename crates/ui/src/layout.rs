@@ -511,8 +511,11 @@ impl Desktop {
                     text("Create a repository").size(20),
                     text_input("New or existing project folder", &self.init_destination)
                         .on_input(Message::InitDestinationChanged),
-                    text_input("Initial branch (default: main)", &self.init_branch)
-                        .on_input(Message::InitBranchChanged),
+                    text_input(
+                        "Initial branch (blank: Git preference or main)",
+                        &self.init_branch
+                    )
+                    .on_input(Message::InitBranchChanged),
                     initialize,
                     text("Clone a repository").size(20),
                     text_input("Clone URL or local source", &self.clone_source)

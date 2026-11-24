@@ -140,15 +140,20 @@ impl Desktop {
             Event::InitBranchChanged(value) if !self.loading => self.init_branch = value,
             Event::Initialize if !self.loading && !self.init_destination.trim().is_empty() => {
                 let destination = self.init_destination.clone();
-                let branch = if self.init_branch.is_empty() {
-                    String::from("main")
-                } else {
-                    self.init_branch.clone()
-                };
+                let branch = self.init_branch.clone();
                 self.loading = true;
                 self.notice = String::from("Initializing repository…");
                 return worker(
-                    move || desktop_git::init_repository(Path::new(&destination), &branch),
+                    move || {
+                        desktop_git::init_repository_with_default_branch(
+                            Path::new(&destination),
+                            if branch.is_empty() {
+                                None
+                            } else {
+                                Some(&branch)
+                            },
+                        )
+                    },
                     Message::Initialized,
                 );
             }

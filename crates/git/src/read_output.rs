@@ -1,7 +1,12 @@
 //! Bounded read-only Git output with distinct complete-record and display policies.
 #[cfg(unix)]
 use std::time::Duration;
-use std::{ffi::OsStr, io, path::Path, process::Output};
+use std::{
+    ffi::OsStr,
+    io,
+    path::Path,
+    process::{Command, Output},
+};
 
 #[cfg(unix)]
 use crate::process::{bounded_output, prefix_output, OutputLimits, PrefixOutput};
@@ -32,15 +37,16 @@ fn successful(output: Output) -> io::Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn complete_output<S: AsRef<OsStr>>(path: &Path, args: &[S], limit: usize) -> io::Result<Output> {
+fn capture(command: Command, limit: usize) -> io::Result<Output> {
     #[cfg(unix)]
     {
-        bounded_output(command(path, args), limits(limit))
+        bounded_output(command, limits(limit))
     }
     #[cfg(not(unix))]
     {
         // Post-buffer checks only until native tree/pipe cancellation (PLAT-01).
-        let output = command(path, args).output()?;
+        let mut command = command;
+        let output = command.output()?;
         if output.stdout.len() > limit || output.stderr.len() > 16 * 1024 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -56,7 +62,7 @@ pub(super) fn complete<S: AsRef<OsStr>>(
     args: &[S],
     limit: usize,
 ) -> io::Result<Vec<u8>> {
-    successful(complete_output(path, args, limit)?)
+    successful(capture(command(path, args), limit)?)
 }
 
 fn optional_output(output: Output) -> io::Result<Option<Vec<u8>>> {
@@ -75,7 +81,12 @@ pub(super) fn optional<S: AsRef<OsStr>>(
     args: &[S],
     limit: usize,
 ) -> io::Result<Option<Vec<u8>>> {
-    optional_output(complete_output(path, args, limit)?)
+    optional_command(command(path, args), limit)
+}
+
+/// Bounded optional read without attaching a repository, for global config queries.
+pub(super) fn optional_command(command: Command, limit: usize) -> io::Result<Option<Vec<u8>>> {
+    optional_output(capture(command, limit)?)
 }
 
 fn display(bytes: &[u8], truncated: bool, label: &str) -> String {

@@ -12,7 +12,7 @@ mod history;
 mod init;
 pub use history::{commit_details, commit_file_diff, commit_history};
 mod merge;
-pub use init::init_repository;
+pub use init::{init_repository, init_repository_with_default_branch};
 pub use merge::{abort_merge, execute_merge, preview_merge};
 mod rebase;
 mod remotes;

@@ -35,6 +35,48 @@ fn check_location(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn configured_initial_branch() -> io::Result<String> {
+    let mut command = super::base_git_command();
+    command.args([
+        "--no-optional-locks",
+        "config",
+        "--global",
+        "--null",
+        "--get",
+        "init.defaultBranch",
+    ]);
+    let Some(mut bytes) = super::read_output::optional_command(command, 64 * 1024)? else {
+        return Ok(String::from("main"));
+    };
+    if bytes.pop() != Some(0) || bytes.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid initial-branch configuration record",
+        ));
+    }
+    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+/// Initialize using an explicit branch override or the global Git preference.
+/// With no override, read `init.defaultBranch`; fall back to `main` only if unset.
+/// Configured values are preserved for validation, including empty/invalid names.
+/// The lookup finishes before reserving any destination or Git metadata.
+///
+/// # Errors
+///
+/// Returns configuration/Git lookup errors (including oversized/invalid output
+/// and Unix read deadlines), or any validation/initialization error documented
+/// by [`init_repository`]. Global configuration is never written by this API.
+pub fn init_repository_with_default_branch(
+    destination: &Path,
+    branch: Option<&str>,
+) -> io::Result<PathBuf> {
+    match branch {
+        Some(branch) => init_repository(destination, branch),
+        None => init_repository(destination, &configured_initial_branch()?),
+    }
+}
+
 /// Initialize a non-bare repository on the explicit initial branch.
 /// Accept a new directory with an existing parent, or an existing directory
 /// containing ordinary project files. Existing/nested repositories and symlinks
