@@ -1,0 +1,14 @@
+{
+  "branch": "rewrite/rust-foundation",
+  "sha": "6868aaad2a61bf7e968f41d1b54a9dbc67fc9e54",
+  "checks": {
+    "fmt": 0,
+    "rust-tests": 0,
+    "clippy": 0,
+    "upstream-registry": 0,
+    "upstream-tests": 0,
+    "npm-lint": 0
+  },
+  "rust_tests_passed": 171,
+  "upstream_tests_passed": 32
+}

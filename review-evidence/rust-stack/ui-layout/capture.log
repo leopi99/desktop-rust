@@ -1,0 +1,4 @@
+   Compiling desktop-rust v0.1.0 (/tmp/desktop-rust-pr-check-qogwmamb/checkout/crates/ui)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.02s
+Captured 6 panels in <workspace>/.git/pr-preparation/rust-stack/evidence/ui-layout/960x640; fixture unchanged
+Captured 6 panels in <workspace>/.git/pr-preparation/rust-stack/evidence/ui-layout/1200x800; fixture unchanged

@@ -1,0 +1,13 @@
+{
+  "size": "1200x800",
+  "panels": [
+    "changes",
+    "history",
+    "branches",
+    "remotes",
+    "stash",
+    "repository"
+  ],
+  "fixture_unchanged": true,
+  "note": "Rendered captures require human visual review; this is not an interaction or accessibility test."
+}

@@ -1,0 +1,13 @@
+npm notice run lint
+npm notice run npm run prettier && npm run lint:src --
+npm notice run prettier
+npm notice run prettier --check "./**/*.{ts,tsx,js,json,jsx,scss,html,yaml,yml}" "./eslint-rules/**/*.mjs"
+Checking formatting...
+All matched files use Prettier code style!
+npm notice run lint:src
+npm notice run npm run eslint-check && npm run eslint --
+npm notice run eslint-check
+npm notice run eslint --print-config .eslintrc.* | eslint-config-prettier-check
+No rules that are unnecessary or conflict with Prettier were found.
+npm notice run eslint
+npm notice run eslint --cache --rulesdir ./eslint-rules "./eslint-rules/**/*.{js,mjs}" "./script/**/*.ts{,x}" "./app/{src,typings,test}/**/*.{j,t}s{,x}" "./changelog.json"

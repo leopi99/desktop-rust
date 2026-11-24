@@ -1,0 +1,17 @@
+{
+  "branch": "rewrite/ui-layout",
+  "sha": "5452f733d5637f46efdbe188926cfd38d6a7789c",
+  "checks": {
+    "fmt": 0,
+    "rust-tests": 0,
+    "clippy": 0,
+    "upstream-registry": 0,
+    "upstream-tests": 0,
+    "npm-lint": 0,
+    "capture-build": 0,
+    "capture-960x640": 0,
+    "capture-1200x800": 0
+  },
+  "rust_tests_passed": 196,
+  "upstream_tests_passed": 32
+}

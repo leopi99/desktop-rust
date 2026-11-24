@@ -1,0 +1,14 @@
+{
+  "branch": "rewrite/commit-history",
+  "sha": "76ffbca5180fc4440655a8ac3dc9b318fc864d10",
+  "checks": {
+    "fmt": 0,
+    "rust-tests": 0,
+    "clippy": 0,
+    "upstream-registry": 0,
+    "upstream-tests": 0,
+    "npm-lint": 0
+  },
+  "rust_tests_passed": 188,
+  "upstream_tests_passed": 32
+}

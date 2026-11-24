@@ -1,0 +1,37 @@
+test_analysis_cannot_skip_unclassified_release_or_change (test_registry.RegistryTests.test_analysis_cannot_skip_unclassified_release_or_change) ... ok
+test_analyzed_release_requires_human_assessment (test_registry.RegistryTests.test_analyzed_release_requires_human_assessment) ... ok
+test_deferred_planned_feature_does_not_claim_full_application_parity (test_registry.RegistryTests.test_deferred_planned_feature_does_not_claim_full_application_parity) ... ok
+test_duplicate_ids_unknown_features_and_wrong_sha_are_rejected (test_registry.RegistryTests.test_duplicate_ids_unknown_features_and_wrong_sha_are_rejected) ... ok
+test_empty_ledger_is_valid (test_registry.RegistryTests.test_empty_ledger_is_valid) ... ok
+test_missing_evidence_or_rust_pr_blocks_implemented_state (test_registry.RegistryTests.test_missing_evidence_or_rust_pr_blocks_implemented_state) ... ok
+test_parity_requires_analysis_and_resolution_of_active_features (test_registry.RegistryTests.test_parity_requires_analysis_and_resolution_of_active_features) ... ok
+test_reason_required_for_deferral_and_non_applicability (test_registry.RegistryTests.test_reason_required_for_deferral_and_non_applicability) ... ok
+test_api_pagination_and_errors (test_sync.DiscoveryTests.test_api_pagination_and_errors) ... ok
+test_bootstrap_does_not_reimport_older_publications (test_sync.DiscoveryTests.test_bootstrap_does_not_reimport_older_publications) ... ok
+test_bootstrap_latest_stable_without_claiming_parity (test_sync.DiscoveryTests.test_bootstrap_latest_stable_without_claiming_parity) ... ok
+test_catch_up_and_idempotence (test_sync.DiscoveryTests.test_catch_up_and_idempotence) ... ok
+test_empty_duplicate_or_malformed_release_response_fails (test_sync.DiscoveryTests.test_empty_duplicate_or_malformed_release_response_fails) ... ok
+test_equal_publication_times_do_not_reimport_pre_baseline_releases (test_sync.DiscoveryTests.test_equal_publication_times_do_not_reimport_pre_baseline_releases) ... ok
+test_ignore_prerelease_and_draft (test_sync.DiscoveryTests.test_ignore_prerelease_and_draft) ... ok
+test_moved_or_disappeared_tag_fails_without_mutation (test_sync.DiscoveryTests.test_moved_or_disappeared_tag_fails_without_mutation) ... ok
+test_new_backport_compares_to_its_release_line (test_sync.DiscoveryTests.test_new_backport_compares_to_its_release_line) ... ok
+test_official_release_tag_format (test_sync.DiscoveryTests.test_official_release_tag_format) ... ok
+test_api_failure_leaves_no_output_or_checkpoint_change (test_sync.PublicationTests.test_api_failure_leaves_no_output_or_checkpoint_change) ... ok
+test_existing_output_is_never_overwritten (test_sync.PublicationTests.test_existing_output_is_never_overwritten) ... ok
+test_git_diff_failure_does_not_publish_partial_state (test_sync.PublicationTests.test_git_diff_failure_does_not_publish_partial_state) ... ok
+test_git_resolution_failure_leaves_no_partial_output (test_sync.PublicationTests.test_git_resolution_failure_leaves_no_partial_output) ... ok
+test_no_new_release_still_produces_a_success_record (test_sync.PublicationTests.test_no_new_release_still_produces_a_success_record) ... ok
+test_real_git_patch_and_commit_list_cover_the_release_interval (test_sync.PublicationTests.test_real_git_patch_and_commit_list_cover_the_release_interval) ... ok
+test_real_git_source_uses_an_isolated_bare_database (test_sync.PublicationTests.test_real_git_source_uses_an_isolated_bare_database) ... ok
+test_success_publishes_complete_proposal_without_changing_ledger (test_sync.PublicationTests.test_success_publishes_complete_proposal_without_changing_ledger) ... ok
+test_api_error_fails_closed (test_watchdog.WatchdogTests.test_api_error_fails_closed) ... ok
+test_disabled_workflow_fails_even_with_previous_success (test_watchdog.WatchdogTests.test_disabled_workflow_fails_even_with_previous_success) ... ok
+test_failure_never_counts_as_a_successful_check (test_watchdog.WatchdogTests.test_failure_never_counts_as_a_successful_check) ... ok
+test_future_timestamp_is_not_healthy (test_watchdog.WatchdogTests.test_future_timestamp_is_not_healthy) ... ok
+test_recent_success_is_healthy (test_watchdog.WatchdogTests.test_recent_success_is_healthy) ... ok
+test_request_filters_default_branch_and_success (test_watchdog.WatchdogTests.test_request_filters_default_branch_and_success) ... ok
+
+----------------------------------------------------------------------
+Ran 32 tests in 0.112s
+
+OK
