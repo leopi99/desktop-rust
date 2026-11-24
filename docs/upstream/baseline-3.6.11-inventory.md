@@ -121,6 +121,55 @@ clients. Special file kinds, conversions, the full caller/status/test matrix and
 interactive/platform QA remain open. This scoped port does not advance feature
 or release parity checkpoints.
 
+## G-05 follow-up: status matrix and operation recovery
+
+Focused excerpts inspected at the pinned source commit:
+[status types](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/models/status.ts),
+[status conflict classification](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/status.ts),
+[merge/manual-resolution tests](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/test/unit/git/commit-test.ts)
+and [rebase progress/continuation tests](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/test/unit/git/rebase/progress-test.ts).
+Upstream distinguishes marker-bearing UU/AA text from manual conflicts using its
+binary classification. Its merge tests cover preserved/deleted modify-delete
+files, both add/add sides and binary choices through commit. Its rebase tests
+repeatedly select theirs and continue through successive conflicts. These focused
+excerpts do not complete whole-file, UI, platform or original fixture audits.
+
+The standard unmerged index matrix guides the scoped Rust write boundary:
+
+| Porcelain status | Index stages | Rust side-write scope |
+| --- | --- | --- |
+| UU | 1, 2, 3 | Explicit regular-file side confirmation; marker-free external text is preserved. |
+| AA | 2, 3 | Explicit regular-file side confirmation; marker-free external text is preserved. |
+| UD | 1, 2 | Confirm ours contents or theirs deletion. |
+| DU | 1, 3 | Confirm ours deletion or theirs contents. |
+| AU | 2 | Read-only preview; side writes require external Git. |
+| UA | 3 | Read-only preview; side writes require external Git. |
+| DD | 1 | Read-only preview; side writes require external Git. |
+
+An absent stage by itself cannot establish an intended deletion in AU/UA/DD or
+coordinate related rename paths. [a083d7f84f](https://github.com/leopi99/desktop-rust/commit/a083d7f84f890144afa6edeaa6cc1324de8ce5a9) explicitly rejects those write
+reviews, while retaining read-only previews. This is a conservative scope boundary,
+not a completed port of every upstream status. Conversion and special-file limits
+from the previous phase still apply. Rename handling across related paths remains
+unimplemented; the status guard does not detect every possible rename relationship.
+
+New Rust operation regressions resolve UU plus AA conflicts separately, require
+fresh review after staging another file, then verify both merge parents and
+untracked-file preservation. Rebase tests confirm stage semantics through continue
+for both sides, original branch restoration and abort after a chosen resolution.
+Choosing all rebased-onto contents leaves no patch: Git omits that replayed commit.
+The inspected upstream [continuation](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/rebase.ts)
+likewise explicitly skips when no tracked changes remain. Originally empty or
+already-applied clean replay commits remain a separate policy from this conflicted
+continuation case.
+
+All errors after entering checkout/remove/add now carry partial-state recovery
+context, including failed post-checkout policy/metadata reads. Real checkout hooks
+exercise conversion-policy changes, hook rejection and subsequent working edits;
+these paths preserve the unmerged index and do not stage a hook-edited file.
+No automatic rollback, transaction against external clients or parity checkpoint
+advance is claimed.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -129,7 +178,7 @@ Feature identifiers match `upstream/features.json`.
 | Feature IDs | Inventory state | Next evidence |
 | --- | --- | --- |
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
-| conflict-resolution | Partial router/helper/caller/test inspection; read-only preview phase implemented | Confirmed writes, full status matrix, conversion/external-edit safeguards, recovery and original tests. |
+| conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
 | repository-read, diff, stage-commit, commit-history | Pending | Status/diff/index contracts, hunk selection, parsing, limits and original tests. |
 | branches, stash | Pending | Supported operations, worktrees, tracking, recovery, original tests. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |

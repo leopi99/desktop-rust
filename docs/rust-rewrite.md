@@ -344,7 +344,10 @@ is a commit-list review, not a prediction that every replay will be conflict-fre
 A paused rebase is detected from Git's worktree-specific metadata after refresh or
 reopening. Resolve text conflicts using Review conflict and Mark resolved, then
 Continue rebase. The ordinary Commit action is blocked while rebasing. Continue
-preserves the original messages without launching a terminal editor. Abort rebase
+preserves messages for replayed commits without launching a terminal editor. If
+a conflicted commit is resolved entirely to rebased-onto contents, no patch remains
+and Git can omit that commit. This differs from preserving clean replay commits
+that start empty or become empty without conflict. Abort rebase
 requires confirmation, returns to the original branch and discards resolution edits.
 Original branch movement, stale index/HEAD/sequencer state and ignored or untracked
 checkout collisions stop the action. Collision checks also include intermediate
@@ -416,8 +419,10 @@ Changes to these inputs require a new review. Selection, navigation and refresh
 clear the pending choice; busy controls cannot start another write. Draft commit
 messages remain intact.
 
-Supported choices include regular text with unresolved markers, NUL-containing
-binary blobs, add/add and missing/deleted sides. Marker-free UU/AA text is treated
+Supported write statuses are UU, AA, UD and DU: regular text with unresolved
+markers, NUL-containing binary blobs, add/add and modify/delete sides. AU, UA and
+DD require external Git for side writes; an absent stage alone cannot authorize
+deletion in those more complex states. Read-only side previews remain available. Marker-free UU/AA text is treated
 as externally resolved and must use the existing review/stage workflow below.
 Filters, text/EOL, ident, working-tree encoding and automatic line-ending
 conversions are conservatively refused. Symlinks, submodules, ambiguous renames
@@ -429,7 +434,8 @@ a deleted side, with literal native paths and no force flag. Configured checkout
 hooks remain active. The final index entry must match the reviewed blob/mode or
 absence. These operations are not atomic against external clients. A checkout,
 hook or staging failure can leave the working file changed: the app reports the
-failure and refreshes; inspect the file/index before recovery. It does not roll
+failure and refreshes; inspect the file/index before recovery. Errors from later
+policy/metadata reads also warn that the working file/index may have changed. It does not roll
 back over subsequent edits or automatically continue a merge/rebase.
 
 Mark reviewed file resolved stages only that file after rechecking its contents,

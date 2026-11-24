@@ -88,7 +88,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 306 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 311 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -158,6 +158,16 @@ artifacts: `/tmp/desktop-rust-confirmed-side-final-g973og71`. These captures do 
 interactive conflict-resolution/accessibility QA. A fresh minimum-size offline
 smoke run also captured eight panels and three Git failure layouts with the fixture
 unchanged (`/tmp/desktop-rust-confirmed-side-smoke-960`).
+The recovery/status increment ([a083d7f84f](https://github.com/leopi99/desktop-rust/commit/a083d7f84f890144afa6edeaa6cc1324de8ce5a9)) passed 311 Rust tests, including
+87 UI state tests, plus 32 upstream and 10 compiler/policy tests and the complete
+formatter/Clippy/rustdoc/npm lint gates. Five new behavioral regressions cover
+conservative AU/UA/DD refusal with unchanged files/index, multi-conflict merge
+through a two-parent commit, both rebase choices through continuation, abort after
+a confirmed choice, and checkout hooks that change policy, fail or edit the file.
+All errors after the first possible write now carry partial-state recovery context.
+No UI layout changed in this increment; the preceding captures remain layout
+observations only. Source audit now records the seven unmerged statuses and the
+upstream empty-resolution continuation case; the full baseline remains open.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.
