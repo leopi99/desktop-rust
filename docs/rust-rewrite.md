@@ -50,6 +50,30 @@ automatic stash or remote branch guessing is used. Before the first commit,
 create-and-switch sets the initial branch name; no branch ref exists until commit.
 Commit drafts survive branch changes; a failed creation also retains the branch name.
 
+## Create a branch from history
+
+In History, select a commit, enter New branch name and choose Create branch at
+selected commit. The full destination commit ID stays visible above the form,
+including while inspecting one of its file diffs. This creates a local reference
+without checking it out; the current branch or detached HEAD, staged/unstaged
+contents, untracked files and commit drafts remain in place. No upstream tracking
+is configured automatically, even with automatic tracking enabled in Git settings.
+Use Branches to switch to the created branch separately.
+
+Only a full commit object ID is accepted by the Git API: symbolic revisions,
+abbreviated hashes, missing objects, trees, blobs and tag objects are refused.
+The UI requires a loaded selection from the observed history list, an idle History
+panel and a name. Index/HEAD/branch freshness, active merge/rebase/cherry-pick/revert
+state, occupied destination refs and saved local destination configuration are
+checked before creation. Git owns ref locks; concurrent external clients can still
+race the preflight checks. No force, checkout, reset or remote write is requested.
+
+Success clears the shared branch-creation name; failure retains it. Both outcomes
+refresh repository/history state while keeping the History panel and unrelated
+drafts. Refresh invalidates commit selection, so select a commit again for another
+action. The input is shared with branch creation in Branches. This scoped history
+action does not implement reset, revert, cherry-pick or full upstream dialog parity.
+
 ## Rename a local branch
 
 In Branches, enter a new name in New local branch name and choose
@@ -290,7 +314,7 @@ history navigation QA remains outstanding.
 
 ## UI transition modules
 
-`crates/ui/src/update/mod.rs` exhaustively routes the application's 81 message
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 82 message
 variants to typed events in ten domain handlers: application/navigation,
 repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
 stashes and completion/refresh. Guard failures explicitly match the relevant

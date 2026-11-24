@@ -35,7 +35,7 @@ All eight are merged. Independent prototype features do not imply release parity
 | --- | --- | --- |
 | Workspace | core/Git/Iced split; Cargo lockfile; Rust/npm CI | Quality policy in the current batch still needs its batch merge. |
 | Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, commits | Hunk selection, large-repository virtualization, richer diff rendering. |
-| Local history/branches | Fixed-tip history paging, committed diffs, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
+| Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
 | UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario | Keyboard/focus/IME/HiDPI/accessibility and complete interactive flows. |
@@ -88,7 +88,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 319 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 326 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -181,6 +181,18 @@ and `/tmp/desktop-rust-selected-rename-1200`. These are layout checks, not butto
 keyboard or accessibility QA. The pinned upstream rename helper/dialog and reflog
 test excerpts were inspected; forced case-only retry and account rulesets remain
 outside this local scope. No parity checkpoint changed.
+History branch creation ([f676e0f9f8](https://github.com/leopi99/desktop-rust/commit/f676e0f9f89aae53ae1026ec7f71de600eb55a6c)) passed 326 Rust tests (92 UI state
+tests), 32 upstream tests and 10 compiler/policy tests, plus formatter, Clippy,
+rustdoc and npm lint. Four new Git regressions exercise an older commit with dirty
+index/worktree, disabled automatic tracking, immutable commit-only inputs, protected
+destinations, stale/active operations and detached HEAD. Three UI regressions cover
+observed-selection guards, busy redirection, completion/refresh and draft retention.
+The full target ID remains visible beside the form. Fresh eight-panel/three-error
+smoke runs at 960×640 and 1200×800 left their fixtures unchanged; History captures
+were visually inspected in `/tmp/desktop-rust-history-branch-960` and
+`/tmp/desktop-rust-history-branch-1200`. These do not automate interaction or prove
+accessibility. Pinned history-menu/dialog/Git helper/store excerpts are recorded
+in the upstream inventory; feature and release parity remain unset.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.

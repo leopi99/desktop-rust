@@ -200,6 +200,33 @@ validation, forced case-only rename policy, other platforms and full interactive
 QA remain outside this scoped port. G-03 still includes further history operations;
 no feature/release parity checkpoint advances.
 
+## Branch creation from an observed commit
+
+Focused pinned excerpts inspected:
+[history context menu](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/history/commit-list.tsx),
+[history callback](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/history/compare.tsx),
+[creation dialog](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/create-branch/create-branch-dialog.tsx),
+[Git helper](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/branch.ts)
+and [Git store creation](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/stores/git-store.ts).
+The menu exposes creation from a commit, the callback opens a dialog with
+`targetCommit`, and the dialog uses its SHA as the start point. The Git helper
+uses `branch` with an explicit destination/start point and optional no-track flag;
+the store refreshes its local branch list. These excerpts do not audit all
+higher-level dispatcher effects, ruleset/account checks, tests or platforms.
+
+Rust [f676e0f9f8](https://github.com/leopi99/desktop-rust/commit/f676e0f9f89aae53ae1026ec7f71de600eb55a6c) adds a scoped History action: full commit-only object ID,
+explicit name and visible target ID, `branch --no-track -- name oid`, no checkout.
+It always disables automatic tracking; UI creation and refresh keep History open.
+Success clears the creation draft; failure retains it; other drafts remain intact.
+The source basis, idle sequencer state, destination ref and orphan local config
+are checked through bounded readers before writing. Destination checks are shared
+with current/selected branch rename. Regressions cover creation at an older commit
+with staged/unstaged/untracked data, automatic-tracking settings, detached HEAD,
+non-commit/missing/symbolic/abbreviated IDs and stale/occupied/active-operation
+refusals. UI state tests verify observed selection and busy/completion behavior.
+Full interaction/platform QA, the complete upstream creation flow and further
+history editing remain open. No parity checkpoint is advanced.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -210,7 +237,7 @@ Feature identifiers match `upstream/features.json`.
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
 | repository-read, diff, stage-commit, commit-history | Pending | Status/diff/index contracts, hunk selection, parsing, limits and original tests. |
-| branches, stash | Partial rename helper/dialog/reflog-test inspection; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
+| branches, stash | Partial rename and commit-based creation slices; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |
 | local-merge, linear-rebase, merge-rebase-conflicts | Pending | Preview/execute/recovery contracts, sequencer state, UI integration and tests. |
 | lfs-submodules, enterprise-pull-requests, advanced-integrations | Pending | Feature surface, dependencies, platform and authentication requirements. |
