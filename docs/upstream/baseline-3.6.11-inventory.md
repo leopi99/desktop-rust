@@ -29,16 +29,31 @@ Sources: [init helper](https://github.com/desktop/desktop/blob/0102f49aa6c8c554d
   default-branch helper also exposes a setter for the global setting.
 - Inspected tests check metadata creation and that symbolic HEAD matches the
   resolver. This inspection alone does not verify every default-setting error case.
-- Rust [initialization](https://github.com/leopi99/desktop-rust/blob/49a9de727eebdb487654a63d846872d2912822f5/crates/git/src/init.rs) takes an explicit initial
+- At the initial Rust observation above, [initialization](https://github.com/leopi99/desktop-rust/blob/49a9de727eebdb487654a63d846872d2912822f5/crates/git/src/init.rs) takes an explicit initial
   branch and guards existing Git metadata. The [UI handler](https://github.com/leopi99/desktop-rust/blob/49a9de727eebdb487654a63d846872d2912822f5/crates/ui/src/update/repository.rs)
   substitutes `main` when the field is blank; it does not resolve the global Git
   preference. [Rust initialization tests](https://github.com/leopi99/desktop-rust/blob/49a9de727eebdb487654a63d846872d2912822f5/crates/git/tests/initialization.rs)
   cover explicit branch creation, preserved files, metadata rejection and first commit.
 
-Observed gap **G-04**: resolve the configured default when the UI field is blank,
-while retaining explicit override, validation and failure propagation. The setter
-and settings UI need their own scope. Upstream caller/location validation still
-needs inspection before comparing Rust's stricter metadata reservation policy.
+Initial gap **G-04**, now addressed locally in [aa524c1101](https://github.com/leopi99/desktop-rust/commit/aa524c11013d4bdd6cef71509823f33be73df662): the new
+`init_repository_with_default_branch` API accepts an explicit override or resolves
+the global setting. The UI passes no override for a blank field. Lookup is bounded
+to 64 KiB stdout / 16 KiB stderr with a 30-second Unix deadline; only quiet absent
+exit 1 enables fallback to main. Configured values are decoded strictly and
+validated before metadata reservation; malformed/invalid data never silently
+becomes the fallback. The original explicit-branch initializer remains available.
+
+Thirteen isolated-process scenarios exercise unset/configured/Unicode/duplicate
+values, explicit override (including an oversized unused preference), malformed,
+empty, invalid, non-UTF-8 and oversized config values, missing Git and an explicitly
+empty override. Tests call the public initializer, check actual symbolic HEAD,
+verify no destination on failure and compare temporary global-config bytes.
+These are Rust regressions, not execution of the original upstream test suite.
+
+The global-setting setter/settings UI and upstream caller/location validation
+still require their own scope. This local port does not complete the whole
+initialization audit or advance analyzed/parity checkpoints. Ledger feature status
+remains prototype pending the required source, PR and substantive review evidence.
 
 ## Explicit manual conflict choices
 
@@ -69,7 +84,7 @@ Feature identifiers match `upstream/features.json`.
 
 | Feature IDs | Inventory state | Next evidence |
 | --- | --- | --- |
-| repository-init | Partial helper/test inspection | UI callers, preference errors/settings, directory validation, platform behavior. |
+| repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/enum inspection | Delegated helpers, binary/deletion/add-add matrix, callers, original tests. |
 | repository-read, diff, stage-commit, commit-history | Pending | Status/diff/index contracts, hunk selection, parsing, limits and original tests. |
 | branches, stash | Pending | Supported operations, worktrees, tracking, recovery, original tests. |

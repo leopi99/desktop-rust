@@ -63,6 +63,7 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - Final merge-tree/rebase runner migration in `56594e0180`: complete raw protocol limits for merge and marked diagnostic tails with preserved status for rebase. Every Unix Git subprocess now uses shared child/reader ownership.
 - UI update separation in `2f79f69b3d`: 74 messages routed exhaustively to ten typed domain handlers, nine support methods moved with them, and shared completion/refresh handling retained.
 - Branch-form layout fix in `49a9de727e`, verified at the minimum and default window sizes.
+- First scoped upstream behavior port in `aa524c1101` (G-04): configured initial branch for blank input, explicit override and fail-closed preference lookup before initialization.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
@@ -85,7 +86,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 287 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 289 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -126,6 +127,13 @@ and an endlessly noisy executable on Unix. Both error layouts were inspected at
 960×640 and 1200×800 on Linux/software rendering. It does not automate button clicks
 or establish accessibility parity. Native Windows deadline/tree cleanup remains
 pending.
+The configured-default increment passed the complete local gate with 289 Rust
+tests, including thirteen configuration scenarios across two isolated-process
+regressions. Cases cover fallback, Unicode, duplicate values, explicit override,
+invalid/malformed/non-UTF-8/oversized settings and missing Git, with no global
+config writes or destination reservation in the exercised preflight failures. The updated Create/Clone
+panel was captured and visually inspected at 960×640; the temporary image is
+`/tmp/desktop-rust-preferred-branch-repository-960.png`.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.
@@ -143,7 +151,8 @@ Git distribution, original hotfix runners and upstream release metadata.
 The initial **full baseline** remains pending-analysis; analyzed/parity are unset.
 [The partial pinned inventory](../upstream/baseline-3.6.11-inventory.md) inspects five
 complete source/test files plus selected config functions and identifies configured-default-branch (G-04) and explicit
-manual-conflict-choice (G-05) gaps. Every full-feature inventory row remains open.
+manual-conflict-choice (G-05) gaps. G-04 is now locally addressed in `aa524c1101`;
+G-05 and every full-feature inventory row remain open. No checkpoint is advanced.
 Discovery and watchdog manual success do not prove future scheduled execution.
 Local discovery on 2026-11-24 at 16:32 UTC succeeded with no new stable releases;
 the baseline SHA remained unchanged. Temporary artifacts are in

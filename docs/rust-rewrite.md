@@ -427,7 +427,12 @@ local writes and do not fence concurrent external edits.
 ## Create a local repository
 
 Enter a project folder in the Create repository form and optionally an initial
-branch name (default `main`). The parent must already exist. The app can create a
+branch name. An explicit name wins; when the field is blank, the worker reads
+global Git `init.defaultBranch` and uses `main` only when the setting is absent.
+During preference resolution, malformed/invalid/empty/non-UTF-8/oversized settings
+and lookup failures are reported before creating a destination. Values are validated as literal branch names,
+without trimming an invalid value into a fallback. Global configuration is read
+only. The parent must already exist. The app can create a
 new folder or initialize an existing folder containing ordinary project files.
 Project files are preserved and left untracked; no README, ignore file, license or
 initial commit is generated automatically. After creation the repository opens in
