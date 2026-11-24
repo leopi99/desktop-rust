@@ -3,6 +3,7 @@ mod branches;
 mod conflicts;
 pub use conflicts::{inspect_conflict, resolve_conflict};
 mod process;
+mod read_output;
 mod runtime;
 pub use runtime::git_runtime;
 mod history;
@@ -174,11 +175,13 @@ pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
 }
 
 /// Show index and working-tree differences separately, including unborn branches.
-/// The selected path must still occur in the repository status.
+/// The selected path must still occur in the repository status. Tracked patches
+/// retain at most 256 KiB of raw output per side, with an explicit truncation marker.
 ///
 /// # Errors
 ///
 /// Returns an error if the selected change is stale, unsupported or cannot be read by Git.
+/// Unix patch subprocesses also fail on a thirty-second deadline or oversized stderr.
 pub fn diff(path: &Path, selected: &FileChange) -> io::Result<FileDiff> {
     if !changes(path)?.contains(selected) {
         return Err(io::Error::other(
@@ -221,7 +224,16 @@ pub fn diff(path: &Path, selected: &FileChange) -> io::Result<FileDiff> {
         if let Some(original) = &selected.original_path {
             args.push(original.as_os_str());
         }
-        Ok(String::from_utf8_lossy(&read_bytes(path, &args)?).into_owned())
+        read_output::preview(
+            path,
+            &args,
+            256 * 1024,
+            if cached {
+                "Staged diff"
+            } else {
+                "Unstaged diff"
+            },
+        )
     };
     Ok(FileDiff {
         staged: read_diff(true)?,

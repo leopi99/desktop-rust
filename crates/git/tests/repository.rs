@@ -958,3 +958,93 @@ fn pre_cancelled_clone_never_creates_destination() {
     assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
     assert!(!target.exists());
 }
+
+#[test]
+fn large_tracked_previews_preserve_index_and_worktree_and_still_stage_full_files() {
+    let repo = Fixture::new();
+    repo.write("file", b"base\n");
+    repo.commit();
+    let staged = "staged line\n".repeat(220_000);
+    repo.write("file", staged.as_bytes());
+    repo.git(&["add", "--", "file"]);
+    let working = "working line\n".repeat(230_000);
+    repo.write("file", working.as_bytes());
+    let state = desktop_git::snapshot(&repo.0).unwrap();
+    let index = std::fs::read(repo.0.join(".git/index")).unwrap();
+    let diff = desktop_git::diff(&repo.0, &state.changes[0]).unwrap();
+    assert!(diff.staged.contains("+staged line"));
+    assert!(diff.unstaged.contains("-staged line"));
+    assert!(!diff.staged.contains("working line"));
+    assert!(diff.staged.ends_with("[Staged diff preview truncated]"));
+    assert!(diff.unstaged.ends_with("[Unstaged diff preview truncated]"));
+    assert!(diff.staged.len() < 257 * 1024);
+    assert!(diff.unstaged.len() < 257 * 1024);
+    assert_eq!(std::fs::read(repo.0.join(".git/index")).unwrap(), index);
+    assert_eq!(
+        std::fs::read(repo.0.join("file")).unwrap(),
+        working.as_bytes()
+    );
+    assert_eq!(
+        desktop_git::snapshot(&repo.0).unwrap().commit_basis,
+        state.commit_basis
+    );
+    desktop_git::stage(&repo.0, &state.changes[0]).unwrap();
+    let stored = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["show", ":file"])
+        .output()
+        .unwrap();
+    assert!(stored.status.success());
+    assert_eq!(stored.stdout, working.as_bytes());
+    assert_eq!(
+        std::fs::read(repo.0.join("file")).unwrap(),
+        working.as_bytes()
+    );
+}
+
+#[test]
+fn large_unborn_staged_patch_is_marked_without_inventing_an_unstaged_diff() {
+    let repo = Fixture::new();
+    repo.write("new", &vec![b'x'; 2 * 1024 * 1024]);
+    repo.git(&["add", "--", "new"]);
+    let state = desktop_git::snapshot(&repo.0).unwrap();
+    let before = std::fs::read(repo.0.join(".git/index")).unwrap();
+    let diff = desktop_git::diff(&repo.0, &state.changes[0]).unwrap();
+    assert!(diff.staged.contains("+xxxxxxxx"));
+    assert!(diff.staged.ends_with("[Staged diff preview truncated]"));
+    assert!(diff.staged.len() < 257 * 1024);
+    assert!(diff.unstaged.is_empty());
+    assert_eq!(std::fs::read(repo.0.join(".git/index")).unwrap(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn clipped_tracked_diff_keeps_native_path_and_disables_textconv() {
+    use std::os::unix::ffi::OsStrExt;
+    let repo = Fixture::new();
+    let name = std::ffi::OsStr::from_bytes(b"file-\xff");
+    std::fs::write(repo.0.join(name), b"base\n").unwrap();
+    repo.commit();
+    repo.git(&["config", "diff.external", "nonexistent-diff-helper"]);
+    repo.git(&[
+        "config",
+        "diff.custom.textconv",
+        "nonexistent-textconv-helper",
+    ]);
+    std::fs::write(repo.0.join(".git/info/attributes"), b"* diff=custom\n").unwrap();
+    let content = vec![b'x'; 2 * 1024 * 1024];
+    std::fs::write(repo.0.join(name), &content).unwrap();
+    let state = desktop_git::snapshot(&repo.0).unwrap();
+    let selected = state
+        .changes
+        .iter()
+        .find(|change| change.path.as_os_str() == name)
+        .unwrap();
+    let diff = desktop_git::diff(&repo.0, selected).unwrap();
+    assert!(diff.staged.is_empty());
+    assert!(diff.unstaged.contains("+xxxxxxxx"));
+    assert!(diff.unstaged.ends_with("[Unstaged diff preview truncated]"));
+    assert!(diff.unstaged.len() < 257 * 1024);
+    assert_eq!(std::fs::read(repo.0.join(name)).unwrap(), content);
+}

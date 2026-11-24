@@ -1,4 +1,4 @@
-//! Bounded historical reads with distinct complete-record and display policies.
+//! Bounded read-only Git output with distinct complete-record and display policies.
 use std::{ffi::OsStr, io, path::Path};
 #[cfg(unix)]
 use std::{process::Output, time::Duration};
@@ -26,7 +26,7 @@ fn limits(stdout: usize) -> OutputLimits {
 fn successful(output: Output) -> io::Result<Vec<u8>> {
     if !output.status.success() {
         return Err(io::Error::other(format!(
-            "Historical Git read failed ({}): {}",
+            "Git read failed ({}): {}",
             output.status,
             String::from_utf8_lossy(&output.stderr)
         )));
@@ -50,7 +50,7 @@ pub(super) fn complete<S: AsRef<OsStr>>(
         if bytes.len() > limit {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Historical metadata exceeded its output limit",
+                "Git metadata exceeded its output limit",
             ));
         }
         Ok(bytes)

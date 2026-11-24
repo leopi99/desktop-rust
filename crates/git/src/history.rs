@@ -1,6 +1,5 @@
 //! Immutable commit history and literal-path diffs. No checkout or index writes.
-mod read;
-use super::file_path;
+use super::{file_path, read_output as read};
 use desktop_core::{CommitDetails, CommitFile, CommitSummary};
 use std::{
     ffi::{OsStr, OsString},
