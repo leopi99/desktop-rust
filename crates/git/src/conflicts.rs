@@ -113,6 +113,10 @@ fn count_markers(bytes: &[u8], size: usize) -> usize {
 
 /// Review the current text or deletion of a still-unmerged file. No writes occur.
 /// Marker-like lines are conservatively rejected, including diff3 base markers.
+///
+/// # Errors
+///
+/// Returns an error for stale/non-conflicted paths, unsupported contents, invalid metadata or I/O failure.
 pub fn inspect_conflict(path: &Path, selected: &FileChange) -> io::Result<ConflictReview> {
     let state = snapshot(path)?;
     if !selected.is_conflicted() || !state.changes.contains(selected) {
@@ -139,6 +143,10 @@ pub fn inspect_conflict(path: &Path, selected: &FileChange) -> io::Result<Confli
 /// Stage only the reviewed file after checking the index/HEAD, file and attributes
 /// again. Never rewrite the working tree or resolve other files automatically.
 /// External edits can still race between this preflight and Git acquiring locks.
+///
+/// # Errors
+///
+/// Returns an error if the reviewed basis/content changed, markers remain or Git rejects staging.
 pub fn resolve_conflict(review: &ConflictReview) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()

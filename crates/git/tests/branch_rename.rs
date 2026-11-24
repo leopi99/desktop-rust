@@ -1,3 +1,6 @@
+//! Git integration coverage for branch rename.
+#![cfg(test)]
+
 use desktop_git::{rename_current_branch, snapshot};
 use std::{
     ffi::OsStr,

@@ -54,6 +54,10 @@ fn validate_basis(path: &Path, expected: &CommitBasis) -> io::Result<()> {
 
 /// Save staged/unstaged tracked changes, leaving unstaged new files in place.
 /// The current working-tree contents are saved; external edits are not fenced.
+///
+/// # Errors
+///
+/// Returns an error for stale/unsupported state, no savable tracked changes or Git failure.
 pub fn save_stash(path: &Path, message: &str, expected: &CommitBasis) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -165,6 +169,10 @@ fn check_collisions(path: &Path, stash: &StashEntry) -> io::Result<()> {
 
 /// Restore a selected stash's staged and unstaged changes, retaining the stash.
 /// Require a clean working tree; conflicts are reported without dropping the copy.
+///
+/// # Errors
+///
+/// Returns an error for stale/missing stash entries, local collisions, unsupported state or Git failure, including conflicts.
 pub fn apply_stash(
     path: &Path,
     selected: &StashEntry,

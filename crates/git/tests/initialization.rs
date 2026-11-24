@@ -1,3 +1,6 @@
+//! Git integration coverage for initialization.
+#![cfg(test)]
+
 use std::{
     path::{Path, PathBuf},
     process::Command,

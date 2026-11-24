@@ -61,6 +61,10 @@ fn validate_basis(path: &Path, expected: &CommitBasis) -> io::Result<()> {
 /// Create and switch to a local branch at the current HEAD, without resetting an
 /// existing branch. On an unborn branch this changes the initial branch name.
 /// Configured checkout hooks run normally; Git preserves or rejects local edits.
+///
+/// # Errors
+///
+/// Returns an error for an invalid/occupied name, stale source state, active merge/rebase or Git rejection.
 pub fn create_branch(path: &Path, name: &str, expected: &CommitBasis) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -78,6 +82,10 @@ pub fn create_branch(path: &Path, name: &str, expected: &CommitBasis) -> io::Res
 /// Switch only to an explicitly selected local branch at its observed target.
 /// No force, automatic remote tracking, reset, or automatic stash is performed.
 /// External Git clients can still race after the preflight checks.
+///
+/// # Errors
+///
+/// Returns an error for a stale source/target, active operation, checkout collision or Git rejection.
 pub fn switch_branch(
     path: &Path,
     selected: &LocalBranch,
@@ -118,6 +126,10 @@ pub fn switch_branch(
 /// Git moves its reflog and local branch configuration; index and files stay put.
 /// Unborn/detached HEAD and active sequencers require a different workflow.
 /// External clients can still race after these preflight checks.
+///
+/// # Errors
+///
+/// Returns an error for invalid or occupied names/configuration, stale state, active operation, worktree use or Git rejection.
 pub fn rename_current_branch(
     path: &Path,
     name: &str,
@@ -129,10 +141,13 @@ pub fn rename_current_branch(
     validate_name(path, name)?;
     validate_basis(path, expected)?;
     super::merge::ensure_idle(path)?;
-    let source = expected
+    let branch = expected
         .branch
         .as_ref()
-        .and_then(|branch| branch.as_encoded_bytes().strip_prefix(b"refs/heads/"))
+        .ok_or_else(|| io::Error::other("Select a committed local branch before renaming"))?;
+    let source = branch
+        .as_encoded_bytes()
+        .strip_prefix(b"refs/heads/")
         .filter(|branch| !branch.is_empty())
         .ok_or_else(|| io::Error::other("Select a committed local branch before renaming"))?;
     if expected.head.is_none() {
@@ -166,11 +181,7 @@ pub fn rename_current_branch(
             "The destination already has branch configuration; choose another name",
         ));
     }
-    let full_ref = expected
-        .branch
-        .as_ref()
-        .expect("validated branch")
-        .as_encoded_bytes();
+    let full_ref = branch.as_encoded_bytes();
     if read_bytes(path, &["worktree", "list", "--porcelain", "-z"])?
         .split(|byte| *byte == 0)
         .filter(|entry| entry.strip_prefix(b"branch ") == Some(full_ref))
@@ -203,6 +214,10 @@ pub fn rename_current_branch(
 /// the current HEAD. Git also checks its upstream and linked-worktree use.
 /// No forced deletion or remote operation is performed. External clients can
 /// still race between preflight checks and Git acquiring its own ref locks.
+///
+/// # Errors
+///
+/// Returns an error for current/unmerged/stale branches, active operations, worktree use or Git rejection.
 pub fn delete_local_branch(
     path: &Path,
     selected: &LocalBranch,

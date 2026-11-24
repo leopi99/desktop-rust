@@ -106,7 +106,11 @@ fn build_preview(
             "Target branch changed or was removed; refresh the merge preview",
         ));
     }
-    let head = expected.head.as_ref().expect("verified HEAD").trim();
+    let head = expected
+        .head
+        .as_deref()
+        .ok_or_else(|| io::Error::other("A committed HEAD is required"))?
+        .trim();
     let mut preview = MergePreview {
         repository: state.repository,
         target: target.clone(),
@@ -178,6 +182,10 @@ fn build_preview(
 
 /// Predict mergeability without changing HEAD, index or working-tree files.
 /// Divergent previews write temporary Git objects and can invoke configured merge drivers.
+///
+/// # Errors
+///
+/// Returns an error for stale/dirty/unsupported source state, changed targets, unrelated histories or Git failure.
 pub fn preview_merge(
     path: &Path,
     target: &LocalBranch,
@@ -191,6 +199,10 @@ pub fn preview_merge(
 
 /// Merge exactly the reviewed commit. Fast-forwards finish immediately; divergent
 /// merges stop before commit so the user can review or resolve the resulting index.
+///
+/// # Errors
+///
+/// Returns an error if the preview is no longer valid, checkout collisions are found or Git rejects execution.
 pub fn execute_merge(preview: &MergePreview) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -205,9 +217,15 @@ pub fn execute_merge(preview: &MergePreview) -> io::Result<String> {
     }
     // branch.<name>.mergeOptions can add strategies (not just defaults), so clear
     // them before supplying the exact, previewed merge policy.
-    let branch = Path::new(preview.basis.branch.as_ref().expect("verified branch"))
-        .strip_prefix("refs/heads")
-        .map_err(|_| io::Error::other("Invalid local branch ref"))?;
+    let branch = Path::new(
+        preview
+            .basis
+            .branch
+            .as_ref()
+            .ok_or_else(|| io::Error::other("A local branch is required"))?,
+    )
+    .strip_prefix("refs/heads")
+    .map_err(|_| io::Error::other("Invalid local branch ref"))?;
     let mut options = OsString::from("branch.");
     options.push(branch.as_os_str());
     options.push(".mergeOptions=");
@@ -250,6 +268,10 @@ pub fn execute_merge(preview: &MergePreview) -> io::Result<String> {
 
 /// Abort an in-progress merge after explicit user confirmation. Git discards merge
 /// results/resolution edits; no stash or unrelated untracked files are deleted.
+///
+/// # Errors
+///
+/// Returns an error for stale/non-merge state or Git rejection; abort can discard merge resolution edits.
 pub fn abort_merge(path: &Path, expected: &CommitBasis) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()

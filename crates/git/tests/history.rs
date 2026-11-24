@@ -1,3 +1,6 @@
+//! Git integration coverage for history.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, CommitFile};
 use std::{
     collections::HashSet,

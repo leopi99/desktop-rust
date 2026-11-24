@@ -90,6 +90,10 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
 /// Fetch, fast-forward pull, or non-forced push to an explicitly selected remote.
 /// Push sends only HEAD to the tracked remote branch, or the same local branch
 /// name when unpublished, and establishes tracking after success.
+///
+/// # Errors
+///
+/// Returns an error for unsupported endpoints, stale repository state, cancellation, timeout or Git/transport failure.
 pub fn remote_operation(
     path: &Path,
     remote: &Remote,
@@ -100,6 +104,10 @@ pub fn remote_operation(
 }
 
 /// Execute a remote action with live diagnostics, cancellation and a deadline.
+///
+/// # Errors
+///
+/// Returns an error for unsupported endpoints, stale state, cancellation, timeout or Git/transport failure.
 pub fn remote_operation_with_control(
     path: &Path,
     remote: &Remote,
@@ -193,11 +201,19 @@ pub fn remote_operation_with_control(
 /// Clone into a newly reserved destination. Existing paths are never reused.
 /// A failed clone may leave partial files for manual inspection; no recursive
 /// cleanup is performed. Credentials come from Git helpers/SSH, not this API.
+///
+/// # Errors
+///
+/// Returns an error for invalid sources/destinations, cancellation, timeout or Git/transport failure; partial output may remain.
 pub fn clone_repository(source: &str, destination: &Path) -> io::Result<PathBuf> {
     clone_repository_with_control(source, destination, &TransferControl::default())
 }
 
 /// Clone with live diagnostics, cancellation and a deadline.
+///
+/// # Errors
+///
+/// Returns an error for invalid sources/destinations, cancellation, timeout or Git/transport failure; partial output may remain.
 pub fn clone_repository_with_control(
     source: &str,
     destination: &Path,
@@ -264,6 +280,10 @@ fn validate_source(source: &str) -> io::Result<()> {
 }
 
 /// Add a named remote without fetching or changing branch tracking.
+///
+/// # Errors
+///
+/// Returns an error for invalid/duplicate names, unsupported URLs or Git/configuration failure.
 pub fn add_remote(path: &Path, name: &str, url: &str) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -300,6 +320,10 @@ fn validate_remote(path: &Path, selected: &Remote) -> io::Result<()> {
 
 /// Replace the sole URL for one endpoint, retaining the other endpoint's config.
 /// Multi-URL endpoints are rejected rather than silently replacing only one URL.
+///
+/// # Errors
+///
+/// Returns an error for a stale remote, invalid/unsupported endpoints or Git/configuration failure.
 pub fn set_remote_url(
     path: &Path,
     selected: &Remote,
@@ -334,6 +358,10 @@ pub fn set_remote_url(
 
 /// Remove local remote configuration and its remote-tracking refs using Git.
 /// Local branches, working-tree files and the server repository are not deleted.
+///
+/// # Errors
+///
+/// Returns an error if the selected remote changed or Git/configuration removal fails.
 pub fn remove_remote(path: &Path, selected: &Remote) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()

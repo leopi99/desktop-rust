@@ -153,7 +153,11 @@ fn build_preview(
             "Target branch changed or was removed; refresh the rebase preview",
         ));
     }
-    let head = expected.head.as_ref().expect("verified HEAD").trim();
+    let head = expected
+        .head
+        .as_deref()
+        .ok_or_else(|| io::Error::other("A committed HEAD is required"))?
+        .trim();
     let mut preview = RebasePreview {
         repository: source.repository,
         target: target.clone(),
@@ -211,6 +215,10 @@ fn build_preview(
 }
 
 /// Preview candidate linear commits without modifying refs, index or files.
+///
+/// # Errors
+///
+/// Returns an error for stale/dirty state, unsupported histories/metadata, checkout collisions or Git failure.
 pub fn preview_rebase(
     path: &Path,
     target: &LocalBranch,
@@ -307,6 +315,10 @@ fn run(root: &Path, args: &[&str]) -> io::Result<String> {
 }
 
 /// Replay the reviewed commits with no autosquash, automatic stash or other-ref updates.
+///
+/// # Errors
+///
+/// Returns an error for a stale preview, unsupported state, checkout collisions or Git failure, including conflicts requiring resolution.
 pub fn execute_rebase(preview: &RebasePreview) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -378,6 +390,10 @@ fn validate_active(root: &Path, expected: &CommitBasis) -> io::Result<RebaseStat
 }
 
 /// Continue after resolutions are staged, retaining original commit messages.
+///
+/// # Errors
+///
+/// Returns an error for stale/unsupported sequencer state, unresolved conflicts, checkout collisions or Git failure.
 pub fn continue_rebase(root: &Path, expected: &CommitBasis) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -393,6 +409,10 @@ pub fn continue_rebase(root: &Path, expected: &CommitBasis) -> io::Result<String
 }
 
 /// Abort after explicit confirmation, protecting untracked/ignored checkout collisions.
+///
+/// # Errors
+///
+/// Returns an error for stale/unsupported sequencer state, checkout collisions or Git rejection.
 pub fn abort_rebase(root: &Path, expected: &CommitBasis) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()

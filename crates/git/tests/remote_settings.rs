@@ -1,3 +1,6 @@
+//! Git integration coverage for remote settings.
+#![cfg(test)]
+
 use desktop_core::{Remote, RemoteAction, RemoteUrlKind};
 use std::{
     path::{Path, PathBuf},

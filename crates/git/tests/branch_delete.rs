@@ -1,3 +1,6 @@
+//! Git integration coverage for branch delete.
+#![cfg(test)]
+
 use desktop_git::{delete_local_branch, snapshot};
 use std::{
     ffi::OsStr,

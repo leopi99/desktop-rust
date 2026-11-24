@@ -46,6 +46,10 @@ fn preview(bytes: &[u8], limit: usize, label: &str) -> String {
 }
 
 /// Read up to 100 commits anchored at a fixed tip, so paging survives HEAD changes.
+///
+/// # Errors
+///
+/// Returns an error for an invalid full object ID, malformed history output or Git failure.
 pub fn commit_history(path: &Path, head: &str, offset: usize) -> io::Result<Vec<CommitSummary>> {
     validate_oid(head)?;
     let bytes = read_bytes(
@@ -160,6 +164,10 @@ fn files(path: &Path, oid: &str, parents: &[String]) -> io::Result<Vec<CommitFil
 }
 
 /// Read a commit message and file list. Merge commits use the first parent.
+///
+/// # Errors
+///
+/// Returns an error for invalid/missing commits, malformed metadata or Git failure.
 pub fn commit_details(path: &Path, oid: &str) -> io::Result<CommitDetails> {
     validate_oid(oid)?;
     let bytes = read_bytes(
@@ -200,6 +208,10 @@ pub fn commit_details(path: &Path, oid: &str) -> io::Result<CommitDetails> {
 }
 
 /// Show a single committed change without consulting or modifying the working tree.
+///
+/// # Errors
+///
+/// Returns an error if the commit is invalid, the path is not in its file list or Git cannot produce the patch.
 pub fn commit_file_diff(path: &Path, oid: &str, selected: &CommitFile) -> io::Result<String> {
     let details = commit_details(path, oid)?;
     if !details.files.contains(selected) {

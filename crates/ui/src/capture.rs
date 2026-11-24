@@ -7,16 +7,21 @@ use std::{
 
 type Error = Box<dyn std::error::Error>;
 
+#[derive(Debug)]
 pub(super) struct Start {
     repository: Option<PathBuf>,
-    pub capture: Option<PathBuf>,
+    pub(super) capture: Option<PathBuf>,
     panel: Panel,
     review_delete: bool,
-    pub size: iced::Size,
+    pub(super) size: iced::Size,
 }
 
 impl Start {
-    pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Option<Self>, Error> {
+    #[expect(
+        clippy::print_stdout,
+        reason = "The developer CLI help is explicit stdout output"
+    )]
+    pub(super) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Option<Self>, Error> {
         let mut start = Self {
             repository: None,
             capture: None,
@@ -77,7 +82,7 @@ impl Start {
         Ok(Some(start))
     }
 
-    pub fn initialize(self) -> Result<Desktop, Error> {
+    pub(super) fn initialize(self) -> Result<Desktop, Error> {
         let mut app = Desktop {
             capture: self.capture,
             ..Desktop::default()

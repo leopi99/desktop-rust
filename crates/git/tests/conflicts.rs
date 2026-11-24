@@ -1,3 +1,6 @@
+//! Git integration coverage for conflicts.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, ConflictContent, FileChange};
 use std::{
     path::{Path, PathBuf},

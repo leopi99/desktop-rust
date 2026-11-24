@@ -121,6 +121,10 @@ fn changes(path: &Path) -> io::Result<Vec<FileChange>> {
 }
 
 /// Read a repository without changing its index or working tree.
+///
+/// # Errors
+///
+/// Returns an error if Git cannot inspect the repository or its metadata is malformed.
 pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
     let root = read_bytes(path, &["rev-parse", "--show-toplevel"])?;
     // Git terminates this path with one newline; filenames may themselves contain newlines.
@@ -170,6 +174,10 @@ pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
 
 /// Show index and working-tree differences separately, including unborn branches.
 /// The selected path must still occur in the repository status.
+///
+/// # Errors
+///
+/// Returns an error if the selected change is stale, unsupported or cannot be read by Git.
 pub fn diff(path: &Path, selected: &FileChange) -> io::Result<FileDiff> {
     if !changes(path)?.contains(selected) {
         return Err(io::Error::other(
@@ -236,11 +244,14 @@ fn run_write<S: AsRef<OsStr>>(path: &Path, args: &[S], input: Option<&str>) -> i
         .stderr(Stdio::piped())
         .spawn()?;
     let input_result = if let Some(message) = input {
-        child
-            .stdin
-            .take()
-            .expect("piped stdin")
-            .write_all(message.as_bytes())
+        match child.stdin.take() {
+            Some(mut stdin) => stdin.write_all(message.as_bytes()),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::other("Git stdin pipe was not created"));
+            }
+        }
     } else {
         Ok(())
     };
@@ -272,6 +283,10 @@ fn validate_selection(path: &Path, selected: &FileChange) -> io::Result<()> {
 
 /// Stage the selected file's current working-tree contents, including deletion.
 /// Status is revalidated, but concurrent external edits to file contents are not fenced.
+///
+/// # Errors
+///
+/// Returns an error for a stale/conflicted selection, Git rejection or filesystem failure.
 pub fn stage(path: &Path, selected: &FileChange) -> io::Result<()> {
     let _guard = WRITE_LOCK
         .lock()
@@ -296,6 +311,10 @@ pub fn stage(path: &Path, selected: &FileChange) -> io::Result<()> {
 }
 
 /// Remove a selected change from the index without changing working-tree files.
+///
+/// # Errors
+///
+/// Returns an error for a stale/conflicted selection, Git rejection or filesystem failure.
 pub fn unstage(path: &Path, selected: &FileChange) -> io::Result<()> {
     let _guard = WRITE_LOCK
         .lock()
@@ -323,6 +342,10 @@ pub fn unstage(path: &Path, selected: &FileChange) -> io::Result<()> {
 /// Commit the entire staged index, preserving unstaged changes and configured hooks.
 /// Reject an index changed since the snapshot. External clients can still race
 /// between this check and Git acquiring its own locks.
+///
+/// # Errors
+///
+/// Returns an error for a stale basis, unresolved operation, invalid message, hook/signing failure or Git rejection.
 pub fn commit(path: &Path, message: &str, expected: &CommitBasis) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()

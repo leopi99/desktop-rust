@@ -30,6 +30,10 @@ fn check_location(path: &Path) -> io::Result<()> {
 /// containing ordinary project files. Existing/nested repositories and symlinks
 /// are rejected. No project files are created, staged, committed or removed.
 /// An initialization failure may leave newly reserved metadata for inspection.
+///
+/// # Errors
+///
+/// Returns an error for invalid names/destinations, existing or nested Git metadata, filesystem failure or Git rejection.
 pub fn init_repository(destination: &Path, initial_branch: &str) -> io::Result<PathBuf> {
     let _guard = WRITE_LOCK
         .lock()

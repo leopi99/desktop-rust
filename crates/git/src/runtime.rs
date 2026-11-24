@@ -7,6 +7,10 @@ use std::{
 
 /// Inspect the system Git currently resolved through PATH. No install/update is
 /// performed, and the observed version is not a compatibility or security claim.
+///
+/// # Errors
+///
+/// Returns an error if Git cannot start, exits unsuccessfully or reports a malformed version.
 pub fn git_runtime() -> io::Result<GitRuntime> {
     inspect(super::base_git_command())
 }

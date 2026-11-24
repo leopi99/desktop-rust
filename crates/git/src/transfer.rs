@@ -113,15 +113,26 @@ fn drain(mut pipe: impl Read, control: TransferControl) -> io::Result<Vec<u8>> {
     }
 }
 
+#[cfg_attr(
+    unix,
+    expect(
+        unsafe_code,
+        reason = "Unix process-group signalling is isolated here; Git transport children must stop together"
+    )
+)]
 fn terminate(child: &mut Child) {
     #[cfg(unix)]
     {
         // Every transfer starts its own process group, including Git's transport helpers.
         let group = -(child.id() as libc::pid_t);
+        // SAFETY: kill takes integer identifiers, with no pointer/lifetime obligations.
+        // The group comes from our child started with process_group(0).
         unsafe {
             libc::kill(group, libc::SIGTERM);
         }
         thread::sleep(Duration::from_millis(250));
+        // SAFETY: same integer-only syscall contract; failure is tolerated because
+        // the direct child is killed and waited below as well.
         unsafe {
             libc::kill(group, libc::SIGKILL);
         }
@@ -148,8 +159,14 @@ pub(super) fn run<S: AsRef<OsStr>>(
         command.process_group(0);
     }
     let mut child = command.spawn()?;
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
+    let Some(stdout) = child.stdout.take() else {
+        terminate(&mut child);
+        return Err(io::Error::other("Git stdout pipe was not created"));
+    };
+    let Some(stderr) = child.stderr.take() else {
+        terminate(&mut child);
+        return Err(io::Error::other("Git stderr pipe was not created"));
+    };
     let out_control = control.clone();
     let err_control = control.clone();
     let out = thread::spawn(move || drain(stdout, out_control));

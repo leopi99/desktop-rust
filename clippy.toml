@@ -1,0 +1,4 @@
+# Assertion failures belong in tests, not production control flow.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

@@ -1,3 +1,6 @@
+//! Git integration coverage for rebase.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, LocalBranch, RebaseKind, RebasePreview};
 use std::{
     path::{Path, PathBuf},

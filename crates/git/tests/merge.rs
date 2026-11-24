@@ -1,3 +1,6 @@
+//! Git integration coverage for merge.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, LocalBranch, MergeKind, MergePreview};
 use std::{
     path::{Path, PathBuf},

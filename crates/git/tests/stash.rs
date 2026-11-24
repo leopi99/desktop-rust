@@ -1,3 +1,6 @@
+//! Git integration coverage for stash.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, StashEntry};
 use std::{
     path::{Path, PathBuf},

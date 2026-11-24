@@ -1,3 +1,4 @@
+//! Iced entry point and guarded UI state transitions for the Rust preview.
 mod capture;
 mod clip;
 mod layout;
@@ -278,7 +279,15 @@ impl Desktop {
                         Ok(()) => self
                             .capture_success
                             .store(true, std::sync::atomic::Ordering::SeqCst),
-                        Err(error) => eprintln!("Capture failed: {error}"),
+                        Err(error) => {
+                            #[expect(
+                                clippy::print_stderr,
+                                reason = "A developer capture failure must be reported before the app exits"
+                            )]
+                            {
+                                eprintln!("Capture failed: {error}");
+                            }
+                        }
                     }
                 }
                 return iced::exit();

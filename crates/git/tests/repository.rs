@@ -1,3 +1,6 @@
+//! Git integration coverage for repository.
+#![cfg(test)]
+
 use std::{
     path::{Path, PathBuf},
     process::Command,
