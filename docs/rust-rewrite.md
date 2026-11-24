@@ -137,6 +137,10 @@ Their raw stdout limits are:
 | Stash list and each tracked/untracked stash path stream | 4 MiB each |
 | Complete tracked-path scan for stash collision checks | 16 MiB |
 | Branch rename local-config and worktree guards | 4 MiB each |
+| Conflict attribute / rebase branch-tip / common ancestor | 64 KiB each |
+| Rebase plan and each collision path stream | 4 MiB each |
+| Rebase collision paths across all streams | 8 MiB total |
+| Complete tracked-path scan for rebase collisions | 16 MiB |
 
 On Unix each migrated subprocess has a 30-second deadline and a 16 KiB stderr cap,
 using managed process-group cleanup and joined readers. Windows validates these
@@ -165,8 +169,12 @@ stash and local-config output, and stash collision review above 10,000 paths.
 They verify rejected writes, retained config/index/working data/stashes and recovery.
 These are per-subprocess byte/deadline limits and a bounded review count, not one
 operation-wide deadline; filesystem collision checks have no separate deadline.
-Conflict-index queries, initialization detection, remaining rebase queries and
-bespoke merge/rebase readers still require migration under R-05/R-06.
+Conflict attributes and rebase preflight queries now use bounded complete reads.
+Shared ancestry queries require empty stdout and accept only a quiet exit 1 for
+non-ancestry; common-base output must contain a full object ID. The generic
+whole-output reader has been removed. The two remaining Unix whole-output paths
+are the object-writing merge-tree preview and the rebase mutation runner (R-06);
+Windows retains explicit unbounded-capture fallbacks.
 
 ## Git pipe-reader lifecycle
 
@@ -285,6 +293,16 @@ separate job using the same install command.
 
 ## Rebase linear local history
 
+Replay review accepts at most 1,000 candidate commits. Plans above that limit fail
+before execution; existing sequencer metadata above the supported count must be
+managed with Git. Collision checks allow at most 10,000 path records and 8 MiB of
+combined raw path output, with 4 MiB per subprocess stream. Repeated paths count
+again across streams; complete target trees are included, so the review limits
+also apply to fast-forward and recovery checks. Individually valid streams cannot
+silently exceed the combined budget. These bounds do not add a deadline to the
+mutating rebase process or one overall deadline to filesystem checks.
+
+
 Select a local branch, then Preview rebase to review the candidate commits and the
 exact target commit. Already-based history is left alone, a direct ancestor can
 fast-forward, and divergent linear commits are replayed with new IDs. The source
@@ -398,7 +416,13 @@ and form inputs; newly created folders or metadata may remain for inspection.
 Concurrent external filesystem changes are not a transaction with this preflight.
 Git commands ignore inherited repository-routing variables such as `GIT_DIR`,
 `GIT_WORK_TREE` and `GIT_INDEX_FILE`, while keeping normal identity, helper and SSH
-configuration. Initialization is tested end-to-end through the first staged commit;
+configuration. Before reserving metadata, initialization scans destination
+ancestors for `.git` entries and conservative bare/separate Git layouts (HEAD,
+objects and refs/reftable/packed-refs markers), without interpreting Git failures
+as repository absence. Broken/symlinked markers are protected and filesystem
+errors propagate. An ordinary project file named HEAD alone remains valid.
+These checks do not fence concurrent external filesystem changes.
+Initialization is tested end-to-end through the first staged commit;
 the resting Create / Clone panel has been visually checked, but interactive UI QA remains outstanding.
 
 ## Clone and remotes

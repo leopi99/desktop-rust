@@ -40,6 +40,7 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - Concurrent local-write pipe draining in `bff5464a57`, with 64 KiB per-stream diagnostic tails and regressions for multi-megabyte input/output, early stdin closure and noisy real hooks.
 - Core status/index/HEAD/path and branch-list capture limits in `e6ecdaa16d`, including explicit quiet absent-ref handling, commit-object validation and refusal of writes after oversized scans.
 - Remote/stash metadata and branch config/worktree limits in `80fd340d1c`, including remote/URL counts, bounded stash collision review, one tracked-path scan and propagation of stash third-parent read errors.
+- Rebase plan/collision/ref reads, shared ancestry queries and conflict attributes in `2e273b3ba9`, plus filesystem-based initialization guards. No production generic whole-output reader remains.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
@@ -48,9 +49,10 @@ for this reliability batch; continue from it rather than dropping its unmerged
 policy by starting again from `development`. Runtime/process hardening is in
 progress; broader adapter child-lifecycle work and UI handler separation remain
 coherent follow-ups. R-05 now covers core snapshot/freshness scans and the
-remote/stash/branch-config/worktree adapters. Conflict-index reads, initialization
-detection, remaining rebase queries and bespoke merge/rebase runners still need
-migration from whole-output capture. The migrated local-write runner (R-06)
+remote/stash/branch-config/worktree adapters and rebase/conflict preflight reads.
+The object-writing merge-tree preview and rebase mutation runner are the two
+remaining Unix whole-output subprocess paths. Windows still has explicit
+unbounded-capture fallbacks. The migrated local-write runner (R-06)
 has no automatic deadline/cancellation for hooks, signing or inherited pipes.
 Status and patch scans each have their own limits; this is not one overall
 operation deadline or a bound on every Git command.
@@ -60,7 +62,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 277 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 282 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -73,7 +75,10 @@ real Git routes hook stdout through stderr. Scan regressions exercise oversized
 index/status/branch data, refused writes and recovery; missing/corrupt HEAD objects
 and non-absence process failures are rejected. Auxiliary regressions cover remote
 count/URL overflow, oversized stash/config data, more than 10,000 collision paths,
-refused writes and successful retry with saved data retained. Record fresh results for later behavior changes; these counts are dated observations, not a
+refused writes and successful retry with saved data retained. Rebase regressions
+cover the exact 1,000-commit boundary, large checkout reviews and aggregate path
+budgets; initialization rejects damaged bare layouts while retaining ordinary
+project files. Record fresh results for later behavior changes; these counts are dated observations, not a
 permanent coverage guarantee.
 
 The offline smoke fixture verifies its files, refs, index and config remain
