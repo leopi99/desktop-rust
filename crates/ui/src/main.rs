@@ -1,6 +1,7 @@
 use desktop_core::{
-    ConflictContent, ConflictReview, FileChange, FileDiff, LocalBranch, MergeKind, MergePreview,
-    RebaseKind, RebasePreview, Remote, RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
+    CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, FileChange,
+    FileDiff, LocalBranch, MergeKind, MergePreview, RebaseKind, RebasePreview, Remote,
+    RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
 use iced::futures::SinkExt;
@@ -13,6 +14,11 @@ struct Desktop {
     path: String,
     snapshot: Option<RepositorySnapshot>,
     detail: String,
+    show_history: bool,
+    history_commits: Vec<CommitSummary>,
+    history_head: Option<String>,
+    history_has_more: bool,
+    commit_details: Option<CommitDetails>,
     loading: bool,
     summary: String,
     description: String,
@@ -49,6 +55,13 @@ enum Message {
     PathChanged(String),
     Open,
     Loaded(Result<RepositorySnapshot, String>),
+    ShowHistory(bool),
+    SelectCommit(CommitSummary),
+    CommitLoaded(Result<CommitDetails, String>),
+    SelectCommitFile(CommitFile),
+    CommitDiffLoaded(Result<String, String>),
+    LoadOlderCommits,
+    OlderCommitsLoaded(Result<Vec<CommitSummary>, String>),
     Select(FileChange),
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
@@ -190,6 +203,99 @@ fn transfer_worker<T: Send + 'static>(
 impl Desktop {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::ShowHistory(show) if !self.loading => {
+                self.show_history = show;
+                self.commit_details = None;
+                self.conflict_review = None;
+                self.merge_preview = None;
+                self.rebase_preview = None;
+                self.detail = if show {
+                    String::from("Select a commit to inspect its message and files")
+                } else {
+                    self.snapshot
+                        .as_ref()
+                        .map(|s| format!("{}\n\nRecent commits\n{}", s.status, s.history))
+                        .unwrap_or_default()
+                };
+            }
+            Message::SelectCommit(commit) if !self.loading && self.show_history => {
+                if let Some(snapshot) = &self.snapshot {
+                    if !self.history_commits.contains(&commit) {
+                        return Task::none();
+                    }
+                    let path = snapshot.repository.path.clone();
+                    self.loading = true;
+                    self.commit_details = None;
+                    self.detail = format!("Loading commit {}…", commit.oid);
+                    return worker(
+                        move || desktop_git::commit_details(&path, &commit.oid),
+                        Message::CommitLoaded,
+                    );
+                }
+            }
+            Message::CommitLoaded(result) => {
+                self.loading = false;
+                match result {
+                    Ok(details) => {
+                        self.detail = format!(
+                            "Commit {}\nAuthor: {}\nDate: {}\nParents: {}\n\n{}",
+                            details.commit.oid,
+                            details.commit.author,
+                            details.commit.authored_at,
+                            details.parents.join(", "),
+                            details.message
+                        );
+                        self.commit_details = Some(details);
+                    }
+                    Err(error) => {
+                        self.commit_details = None;
+                        self.detail = format!("Unable to read commit: {error}");
+                    }
+                }
+            }
+            Message::SelectCommitFile(file) if !self.loading && self.show_history => {
+                if let (Some(snapshot), Some(details)) = (&self.snapshot, &self.commit_details) {
+                    let path = snapshot.repository.path.clone();
+                    let oid = details.commit.oid.clone();
+                    self.loading = true;
+                    self.detail = format!("Loading committed diff for {}…", file.path.display());
+                    return worker(
+                        move || desktop_git::commit_file_diff(&path, &oid, &file),
+                        Message::CommitDiffLoaded,
+                    );
+                }
+            }
+            Message::CommitDiffLoaded(result) => {
+                self.loading = false;
+                self.detail = result
+                    .unwrap_or_else(|error| format!("Unable to read committed diff: {error}"));
+            }
+            Message::LoadOlderCommits
+                if !self.loading && self.show_history && self.history_has_more =>
+            {
+                if let (Some(snapshot), Some(head)) = (&self.snapshot, &self.history_head) {
+                    let path = snapshot.repository.path.clone();
+                    let head = head.clone();
+                    let offset = self.history_commits.len();
+                    self.loading = true;
+                    self.notice = String::from("Loading older commits…");
+                    return worker(
+                        move || desktop_git::commit_history(&path, head.trim(), offset),
+                        Message::OlderCommitsLoaded,
+                    );
+                }
+            }
+            Message::OlderCommitsLoaded(result) => {
+                self.loading = false;
+                match result {
+                    Ok(commits) => {
+                        self.history_has_more = commits.len() == 100;
+                        self.history_commits.extend(commits);
+                        self.notice.clear();
+                    }
+                    Err(error) => self.notice = format!("Unable to load older commits: {error}"),
+                }
+            }
             Message::ToggleStashes => self.show_stashes = !self.show_stashes,
             Message::StashSelected(stash) if !self.loading => self.selected_stash = Some(stash),
             Message::StashMessageChanged(value) if !self.loading => self.stash_message = value,
@@ -233,6 +339,7 @@ impl Desktop {
             Message::PathChanged(path) if !self.loading => {
                 self.path = path;
                 self.snapshot = None;
+                self.clear_history();
                 self.conflict_review = None;
                 self.merge_preview = None;
                 self.rebase_preview = None;
@@ -326,6 +433,7 @@ impl Desktop {
                             "{}\n\nRecent commits\n{}",
                             snapshot.status, snapshot.history
                         );
+                        self.reset_history(&snapshot);
                         self.snapshot = Some(snapshot);
                     }
                     Err(error) => self.detail = format!("Unable to open repository: {error}"),
@@ -841,6 +949,7 @@ impl Desktop {
                                 .find(|stash| stash.oid == selected.oid)
                                 .cloned()
                         });
+                        self.reset_history(&snapshot);
                         self.snapshot = Some(snapshot);
                     }
                     Err(error) => {
@@ -854,6 +963,24 @@ impl Desktop {
             _ => {}
         }
         Task::none()
+    }
+
+    fn clear_history(&mut self) {
+        self.show_history = false;
+        self.history_commits.clear();
+        self.history_head = None;
+        self.history_has_more = false;
+        self.commit_details = None;
+    }
+
+    fn reset_history(&mut self, snapshot: &RepositorySnapshot) {
+        self.history_head = snapshot.commit_basis.head.clone();
+        self.history_commits = snapshot.commits.clone();
+        self.history_has_more = snapshot.commits.len() == 100;
+        self.commit_details = None;
+        if self.show_history {
+            self.detail = String::from("Select a commit to inspect its message and files");
+        }
     }
 
     fn remote_name(&self) -> &str {
@@ -1038,6 +1165,7 @@ impl Desktop {
     fn open_created_repository(&mut self, path: std::path::PathBuf, notice: &str) -> Task<Message> {
         self.path = path.to_string_lossy().into_owned();
         self.snapshot = None;
+        self.clear_history();
         self.conflict_review = None;
         self.merge_preview = None;
         self.rebase_preview = None;
@@ -1369,6 +1497,71 @@ impl Desktop {
                     .push(button("Cancel transfer").on_press(Message::CancelTransfer));
             }
         }
+        let content: Element<'_, Message> = if self.show_history {
+            let mut history = column![text("Commits").size(20)].spacing(6);
+            if self.history_commits.is_empty() {
+                history = history.push(text("No commits yet"));
+            }
+            for commit in &self.history_commits {
+                let mut control = button(text(format!("{} {}", &commit.oid[..7], commit.subject)));
+                if !self.loading {
+                    control = control.on_press(Message::SelectCommit(commit.clone()));
+                }
+                history = history.push(control);
+            }
+            if self.history_has_more {
+                let mut older = button("Load older commits");
+                if !self.loading {
+                    older = older.on_press(Message::LoadOlderCommits);
+                }
+                history = history.push(older);
+            }
+            let mut committed_files = column![text("Committed files").size(20)].spacing(6);
+            if let Some(details) = &self.commit_details {
+                if details.files.is_empty() {
+                    committed_files =
+                        committed_files.push(text("No changes relative to the first parent"));
+                }
+                for file in &details.files {
+                    let mut control =
+                        button(text(format!("{} {}", file.status, file.path.display())));
+                    if !self.loading {
+                        control = control.on_press(Message::SelectCommitFile(file.clone()));
+                    }
+                    committed_files = committed_files.push(control);
+                }
+            }
+            row![
+                scrollable(history).width(Length::FillPortion(2)),
+                scrollable(committed_files).width(Length::FillPortion(2)),
+                scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
+                    .width(Length::FillPortion(5))
+            ]
+            .spacing(12)
+            .height(Length::Fill)
+            .into()
+        } else {
+            row![
+                scrollable(files).width(Length::FillPortion(1)),
+                scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
+                    .width(Length::FillPortion(3))
+            ]
+            .spacing(16)
+            .height(Length::Fill)
+            .into()
+        };
+        let commit_controls: Element<'_, Message> = if self.show_history {
+            column![].into()
+        } else {
+            column![
+                text_input("Commit summary", &self.summary).on_input(Message::SummaryChanged),
+                text_input("Description (optional)", &self.description)
+                    .on_input(Message::DescriptionChanged),
+                commit
+            ]
+            .spacing(12)
+            .into()
+        };
         let mut initialize = button("Create repository");
         if !self.loading && !self.init_destination.trim().is_empty() {
             initialize = initialize.on_press(Message::Initialize);
@@ -1400,16 +1593,12 @@ impl Desktop {
             remote_controls,
             self.stash_view(),
             row![
-                scrollable(files).width(Length::FillPortion(1)),
-                scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
-                    .width(Length::FillPortion(3))
+                button("Changes").on_press(Message::ShowHistory(false)),
+                button("History").on_press(Message::ShowHistory(true))
             ]
-            .spacing(16)
-            .height(Length::Fill),
-            text_input("Commit summary", &self.summary).on_input(Message::SummaryChanged),
-            text_input("Description (optional)", &self.description)
-                .on_input(Message::DescriptionChanged),
-            commit,
+            .spacing(8),
+            content,
+            commit_controls,
             scrollable(text(&self.notice)).height(Length::Fixed(64.0)),
             transfer_controls,
         ]
@@ -1438,6 +1627,7 @@ mod tests {
                     path: "/old".into(),
                 },
                 history: String::new(),
+                commits: Vec::new(),
                 status: String::new(),
                 changes: Vec::new(),
                 branches: Vec::new(),
@@ -2363,5 +2553,125 @@ mod tests {
         assert!(app.notice.is_empty());
         assert!(!app.abort_rebase_pending);
         assert!(app.rebase_preview.is_some());
+    }
+    fn history_commit(number: usize) -> CommitSummary {
+        CommitSummary {
+            oid: format!("{number:040x}"),
+            subject: format!("Commit {number}"),
+            author: "Test Author".into(),
+            authored_at: "2026-11-24T12:00:00+01:00".into(),
+        }
+    }
+
+    fn history_app() -> Desktop {
+        let mut app = loaded();
+        let snapshot = app.snapshot.as_mut().unwrap();
+        snapshot.commits = vec![history_commit(1)];
+        snapshot.commit_basis.head = Some(format!("{}\n", snapshot.commits[0].oid));
+        let snapshot = snapshot.clone();
+        app.reset_history(&snapshot);
+        let _ = app.update(Message::ShowHistory(true));
+        app
+    }
+
+    #[test]
+    fn history_navigation_preserves_drafts_and_invalidates_hidden_write_previews() {
+        let mut app = history_app();
+        app.merge_preview = Some(preview(MergeKind::CleanMerge));
+        let _ = app.update(Message::ShowHistory(true));
+        assert!(app.merge_preview.is_none());
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+        let _ = app.update(Message::ShowHistory(false));
+        assert!(!app.show_history);
+        assert_eq!(app.summary, "Summary");
+    }
+
+    #[test]
+    fn history_refresh_reanchors_the_list_and_invalidates_selected_commit() {
+        let mut app = history_app();
+        app.commit_details = Some(CommitDetails {
+            commit: history_commit(1),
+            parents: Vec::new(),
+            message: "body".into(),
+            files: Vec::new(),
+        });
+        let mut snapshot = app.snapshot.clone().unwrap();
+        snapshot.commits = vec![history_commit(2)];
+        snapshot.commit_basis.head = Some(history_commit(2).oid);
+        let _ = app.update(Message::Refreshed(Ok(snapshot)));
+        assert_eq!(app.history_commits, vec![history_commit(2)]);
+        assert_eq!(app.history_head, Some(history_commit(2).oid));
+        assert!(app.commit_details.is_none());
+        assert!(!app.history_has_more);
+    }
+
+    #[test]
+    fn older_page_appends_without_moving_the_anchor() {
+        let mut app = history_app();
+        app.history_commits = (0..100).map(history_commit).collect();
+        app.history_has_more = true;
+        let anchor = app.history_head.clone();
+        let _ = app.update(Message::OlderCommitsLoaded(Ok(vec![
+            history_commit(100),
+            history_commit(101),
+        ])));
+        assert_eq!(app.history_commits.len(), 102);
+        assert_eq!(app.history_head, anchor);
+        assert!(!app.history_has_more);
+    }
+
+    #[test]
+    fn failed_older_page_preserves_entries_and_allows_retry() {
+        let mut app = history_app();
+        app.history_has_more = true;
+        let before = app.history_commits.clone();
+        let _ = app.update(Message::OlderCommitsLoaded(Err(String::from(
+            "object unavailable",
+        ))));
+        assert_eq!(app.history_commits, before);
+        assert!(app.history_has_more);
+        assert!(app.notice.contains("object unavailable"));
+    }
+
+    #[test]
+    fn repository_change_clears_history_cursor_and_prevents_stale_selection() {
+        let mut app = history_app();
+        let _ = app.update(Message::PathChanged("/new".into()));
+        let _ = app.update(Message::SelectCommit(history_commit(1)));
+        assert!(app.history_commits.is_empty());
+        assert!(app.history_head.is_none());
+        assert!(app.commit_details.is_none());
+        assert!(!app.show_history);
+        assert!(!app.loading);
+    }
+
+    #[test]
+    fn busy_operation_ignores_history_navigation_and_selection() {
+        let mut app = loaded();
+        app.loading = true;
+        let _ = app.update(Message::ShowHistory(true));
+        let _ = app.update(Message::SelectCommit(history_commit(1)));
+        assert!(!app.show_history);
+        assert!(app.detail.is_empty());
+        assert!(app.loading);
+    }
+
+    #[test]
+    fn failed_commit_load_clears_old_files_without_discarding_the_history() {
+        let mut app = history_app();
+        let before = app.history_commits.clone();
+        app.commit_details = Some(CommitDetails {
+            commit: history_commit(1),
+            parents: Vec::new(),
+            message: "old".into(),
+            files: Vec::new(),
+        });
+        let _ = app.update(Message::CommitLoaded(Err(String::from(
+            "object unavailable",
+        ))));
+        assert!(app.commit_details.is_none());
+        assert_eq!(app.history_commits, before);
+        assert!(app.detail.contains("object unavailable"));
     }
 }

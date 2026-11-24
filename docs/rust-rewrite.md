@@ -34,6 +34,23 @@ automatic stash or remote branch guessing is used. Before the first commit,
 create-and-switch sets the initial branch name; no branch ref exists until commit.
 Commit drafts survive branch changes; a failed creation also retains the branch name.
 
+## Commit history
+
+Switch between Changes and History to inspect commits without checking them out.
+History lists 100 commits per page, with Load older commits anchored to the observed
+HEAD object ID. Moving HEAD outside the app does not shift an in-progress page;
+Open / Refresh reloads the list from the new tip. Selecting a commit shows its full
+ID, author, authored date, message and changed files. Selecting a file shows its
+committed diff, independent of current staged/working-tree edits.
+
+Root commits are compared with an empty tree; merge commits use their first parent.
+Renames retain both paths, including non-UTF-8 paths on Unix. External diff and
+textconv helpers are disabled. Commit message previews are limited to 64 KiB and
+committed diff previews to 256 KiB. These are display limits; Git output is currently
+read into memory before preview truncation. Large-repository virtualization and
+streamed historical diffs remain planned. Commit controls are hidden in History;
+switch to Changes to prepare a new commit. Visual QA remains outstanding.
+
 ## Development checks
 
 The Rust app uses Cargo. The inherited source is also checked with the repository's
