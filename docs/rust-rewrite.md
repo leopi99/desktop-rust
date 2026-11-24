@@ -281,7 +281,7 @@ history navigation QA remains outstanding.
 
 ## UI transition modules
 
-`crates/ui/src/update/mod.rs` exhaustively routes the application's 76 message
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 80 message
 variants to typed events in ten domain handlers: application/navigation,
 repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
 stashes and completion/refresh. Guard failures explicitly match the relevant
@@ -405,9 +405,32 @@ Git stage semantics are retained: during rebase, ours is the rebased-onto side a
 theirs is the replayed commit. Previews show the full blob ID and executable flag,
 recheck index/HEAD/status after reading, and clear the old resolution review.
 They are read-only, do not bind the current working-file contents, and cannot be
-used to apply a choice or enable Mark resolved. Choosing and confirming a side
-for overwrite/deletion is still pending G-05 work; external text/deletion review
-continues to use its separate existing workflow below.
+used to apply a choice or enable Mark resolved.
+
+Choose ours / Choose theirs prepares a separate review of both the current working
+file and the selected index blob or deletion. Apply choice explicitly confirms
+replacement/deletion and staging of that path; Cancel choice discards the review.
+The review binds complete contents and executable mode (up to 8 MiB), index/HEAD,
+sequencer state, effective attributes and relevant checkout/staging settings.
+Changes to these inputs require a new review. Selection, navigation and refresh
+clear the pending choice; busy controls cannot start another write. Draft commit
+messages remain intact.
+
+Supported choices include regular text with unresolved markers, NUL-containing
+binary blobs, add/add and missing/deleted sides. Marker-free UU/AA text is treated
+as externally resolved and must use the existing review/stage workflow below.
+Filters, text/EOL, ident, working-tree encoding and automatic line-ending
+conversions are conservatively refused. Symlinks, submodules, ambiguous renames
+and larger blobs require external Git. This is a scoped implementation of G-05;
+the complete upstream status/caller/test audit remains open.
+
+Applying uses Git checkout with the selected side followed by add, or Git rm for
+a deleted side, with literal native paths and no force flag. Configured checkout
+hooks remain active. The final index entry must match the reviewed blob/mode or
+absence. These operations are not atomic against external clients. A checkout,
+hook or staging failure can leave the working file changed: the app reports the
+failure and refreshes; inspect the file/index before recovery. It does not roll
+back over subsequent edits or automatically continue a merge/rebase.
 
 Mark reviewed file resolved stages only that file after rechecking its contents,
 executable mode, index, HEAD and marker settings. Locally deleted files can be
@@ -417,8 +440,8 @@ conflicts are resolved, use the existing commit form; a merge started outside th
 app keeps its merge parents. A stash conflict can be resolved and committed while
 the saved stash remains available.
 
-Binary files, symlinks, submodules and files above 8 MiB still need an external Git
-tool. The UI does not yet edit conflict blocks or offer interactive rebase.
+External binary editing, symlinks, submodules and files above 8 MiB still need an
+external Git tool; supported binary side choices use the separate confirmation above. The UI does not yet edit conflict blocks or offer interactive rebase.
 The checks are preflight validation, not a transaction against concurrent external
 filesystem edits. Visual QA and an integrated conflict editor remain outstanding.
 

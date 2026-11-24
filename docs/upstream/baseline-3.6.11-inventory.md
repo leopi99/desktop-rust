@@ -100,10 +100,26 @@ validated native unmerged index records, full blob IDs/modes, bounded blob reads
 text/NUL-binary/deletion display, post-read freshness and a UI without write
 authority. Tests verify preserved user/index state, resource limits and stale/busy
 cases. It is a raw side-content preview, not upstream's working-file-to-side diff
-renderer. Applying explicit choices still needs a separate review binding the
+renderer. At that preview-only phase, applying explicit choices still needed a separate review binding the
 working contents, index, attributes/conversion policy and confirmation, plus the
 remaining status matrix and failure/recovery tests. G-05 remains in progress;
 feature and release parity checkpoints remain unchanged.
+
+## G-05 follow-up: confirmed regular-file subset
+
+Rust [ba0696b3c5](https://github.com/leopi99/desktop-rust/commit/ba0696b3c57a19c34c5156a82a46f0ef509ac47f) adds a distinct complete review and explicit confirmation for
+regular-file replacement/deletion. It uses the inspected checkout/add/remove
+sequence, preserves native paths and checks the staged blob/mode against the
+reviewed side. Working bytes/mode, index/HEAD/sequencer, attributes and relevant
+settings are revalidated. Marker-free external text resolutions are preserved;
+conversion/filter attributes and automatic line-ending conversion are refused.
+Tests cover text/binary/add-add choices, both missing-side directions, stale data
+and a real post-checkout hook causing staging failure, with manual recovery.
+The UI refreshes after errors and retains draft messages. Checkout and staging
+are separate operations; neither the process mutex nor preflight fences external
+clients. Special file kinds, conversions, the full caller/status/test matrix and
+interactive/platform QA remain open. This scoped port does not advance feature
+or release parity checkpoints.
 
 ## Full-baseline coverage grid
 

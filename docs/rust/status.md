@@ -65,6 +65,7 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - Branch-form layout fix in `49a9de727e`, verified at the minimum and default window sizes.
 - First scoped upstream behavior port in `aa524c1101` (G-04): configured initial branch for blank input, explicit override and fail-closed preference lookup before initialization.
 - First G-05 phase in `c0fcf39b95`: bounded read-only previews of Git index stages 2/3 with raw blob IDs, text/binary/deletion display and native paths. These do not apply a resolution or provide a write token.
+- Confirmed G-05 regular-file choices in [ba0696b3c5](https://github.com/leopi99/desktop-rust/commit/ba0696b3c57a19c34c5156a82a46f0ef509ac47f): a separate complete review, explicit replacement/deletion confirmation, stale-input checks, exact staged-blob postconditions and refresh after partial failure. Conversion/filter paths and special file kinds remain unsupported.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
@@ -87,7 +88,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 296 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 306 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -144,6 +145,19 @@ UI behavior and absence of write authority. A real-conflict Changes capture at
 file remained unchanged. The temporary image is
 `/tmp/desktop-rust-conflict-side-controls-960.png`. Actual button-click and full
 interactive conflict-resolution QA remain pending.
+The confirmed-choice increment passed 306 Rust tests (87 UI state tests),
+32 upstream tests and 10 compiler/policy tests, plus the complete Clippy, formatter,
+rustdoc and npm lint gates. Seven new Git regressions cover both choices, binary
+and add/add sides, both deletion directions, native/literal paths, changed working
+files/index/attributes/settings/mode, external text resolutions and checkout followed
+by a staging-lock failure with manual recovery. UI tests cover explicit authority,
+cancellation/invalidation, busy writes, failure refresh and preserved drafts.
+Read-only confirmation captures for both sides at 960×640 and 1200×800 were
+visually inspected; fixture files/config/index/refs remained unchanged. Temporary
+artifacts: `/tmp/desktop-rust-confirmed-side-final-g973og71`. These captures do not exercise Apply or replace
+interactive conflict-resolution/accessibility QA. A fresh minimum-size offline
+smoke run also captured eight panels and three Git failure layouts with the fixture
+unchanged (`/tmp/desktop-rust-confirmed-side-smoke-960`).
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.
