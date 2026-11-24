@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "features": [
+    { "id": "repository-init", "status": "prototype" },
+    { "id": "repository-read", "status": "prototype" },
+    { "id": "diff", "status": "prototype" },
+    { "id": "stage-commit", "status": "prototype" },
+    { "id": "stash", "status": "prototype" },
+    { "id": "branches", "status": "prototype" },
+    { "id": "remote-settings", "status": "prototype" },
+    { "id": "remotes", "status": "prototype" },
+    { "id": "remotes-auth", "status": "planned" },
+    { "id": "conflict-resolution", "status": "prototype" },
+    { "id": "local-merge", "status": "prototype" },
+    { "id": "linear-rebase", "status": "prototype" },
+    { "id": "merge-rebase-conflicts", "status": "planned" },
+    { "id": "lfs-submodules", "status": "planned" },
+    { "id": "enterprise-pull-requests", "status": "planned" },
+    { "id": "advanced-integrations", "status": "planned" }
+  ]
+}
