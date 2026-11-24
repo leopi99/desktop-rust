@@ -58,6 +58,12 @@ impl Desktop {
             Message::ReviewConflict(change) => {
                 self.update_changes(changes::Event::ReviewConflict(change))
             }
+            Message::ReviewConflictSide(change, side) => {
+                self.update_changes(changes::Event::ReviewConflictSide(change, side))
+            }
+            Message::ConflictSidePreviewed(result) => {
+                self.update_changes(changes::Event::ConflictSidePreviewed(result))
+            }
             Message::ConflictReviewed(result) => {
                 self.update_changes(changes::Event::ConflictReviewed(result.map(Box::new)))
             }

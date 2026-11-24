@@ -1,6 +1,7 @@
 //! Guarded changes state transitions.
 use crate::{
-    worker, ConflictContent, ConflictReview, Desktop, FileChange, FileDiff, Message, Operation,
+    worker, ConflictContent, ConflictReview, ConflictSide, ConflictSideContent,
+    ConflictSidePreview, Desktop, FileChange, FileDiff, Message, Operation,
 };
 use iced::Task;
 
@@ -9,6 +10,8 @@ pub(super) enum Event {
     Select(FileChange),
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
+    ReviewConflictSide(FileChange, ConflictSide),
+    ConflictSidePreviewed(Result<ConflictSidePreview, String>),
     ConflictReviewed(Result<Box<ConflictReview>, String>),
     ResolveConflict,
     Stage(FileChange),
@@ -63,6 +66,48 @@ impl Desktop {
                         Message::ConflictReviewed,
                     );
                 }
+            }
+            Event::ReviewConflictSide(change, side) if !self.loading => {
+                if let Some(snapshot) = &self.snapshot {
+                    let path = snapshot.repository.path.clone();
+                    self.conflict_review = None;
+                    self.loading = true;
+                    self.detail = String::from("Loading read-only index side…");
+                    return worker(
+                        move || desktop_git::inspect_conflict_side(&path, &change, side),
+                        Message::ConflictSidePreviewed,
+                    );
+                }
+            }
+            Event::ConflictSidePreviewed(result) => {
+                self.loading = false;
+                self.conflict_review = None;
+                self.detail = match result {
+                    Ok(preview) => {
+                        let side = match preview.side {
+                            ConflictSide::Ours => "Ours — index stage 2",
+                            ConflictSide::Theirs => "Theirs — index stage 3",
+                        };
+                        let content = match preview.content {
+                            ConflictSideContent::Deleted => {
+                                String::from("This side deletes the file.")
+                            }
+                            ConflictSideContent::Binary { size } => {
+                                format!("Binary blob: {size} bytes. Text preview unavailable.")
+                            }
+                            ConflictSideContent::Text { preview, truncated } => format!(
+                                "{preview}{}",
+                                if truncated {
+                                    "\n[Index-side preview truncated at 64 KiB]"
+                                } else {
+                                    ""
+                                }
+                            ),
+                        };
+                        format!("{}\n{}\nBlob: {}\nExecutable: {}\nRead-only preview. No resolution applied.\nDuring rebase, ours is the rebased-onto side; theirs is the replayed commit.\n\n{}", preview.change.path.display(), side, preview.oid.as_deref().unwrap_or("(deleted)"), preview.executable, content)
+                    }
+                    Err(error) => format!("Unable to inspect conflict side: {error}"),
+                };
             }
             Event::ConflictReviewed(result) => {
                 self.loading = false;
@@ -144,6 +189,7 @@ impl Desktop {
             }
             Event::Select(..)
             | Event::ReviewConflict(..)
+            | Event::ReviewConflictSide(..)
             | Event::ResolveConflict
             | Event::Stage(..)
             | Event::Unstage(..)

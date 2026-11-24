@@ -5,9 +5,10 @@ mod layout;
 mod update;
 
 use desktop_core::{
-    CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, FileChange,
-    FileDiff, GitRuntime, LocalBranch, MergeKind, MergePreview, RebaseKind, RebasePreview, Remote,
-    RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
+    CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, ConflictSide,
+    ConflictSideContent, ConflictSidePreview, FileChange, FileDiff, GitRuntime, LocalBranch,
+    MergeKind, MergePreview, RebaseKind, RebasePreview, Remote, RemoteAction, RemoteUrlKind,
+    RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
 use iced::futures::SinkExt;
@@ -96,6 +97,8 @@ enum Message {
     Select(FileChange),
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
+    ReviewConflictSide(FileChange, ConflictSide),
+    ConflictSidePreviewed(Result<ConflictSidePreview, String>),
     ConflictReviewed(Result<ConflictReview, String>),
     ResolveConflict,
     Stage(FileChange),
@@ -1719,5 +1722,88 @@ mod tests {
         assert!(!app.checking_git);
         assert_eq!(app.summary, "Summary");
         assert_eq!(app.git_runtime.unwrap().unwrap().version, "2.56.1");
+    }
+}
+
+#[cfg(test)]
+mod side_preview_tests {
+    use super::*;
+
+    fn app() -> Desktop {
+        Desktop {
+            summary: "keep summary".into(),
+            description: "keep body".into(),
+            snapshot: Some(RepositorySnapshot {
+                repository: desktop_core::Repository {
+                    path: "/fixture".into(),
+                },
+                status: String::new(),
+                history: String::new(),
+                commits: Vec::new(),
+                changes: Vec::new(),
+                branches: Vec::new(),
+                remotes: Vec::new(),
+                stashes: Vec::new(),
+                merge_message: None,
+                commit_basis: desktop_core::CommitBasis {
+                    index: Vec::new(),
+                    head: None,
+                    branch: None,
+                    merge_heads: None,
+                    rebase: None,
+                },
+            }),
+            ..Desktop::default()
+        }
+    }
+
+    #[test]
+    fn side_preview_never_authorizes_resolution_and_preserves_drafts() {
+        let mut app = app();
+        let change = FileChange {
+            path: "file".into(),
+            original_path: None,
+            index: 'U',
+            worktree: 'U',
+        };
+        let _ = app.update(Message::ReviewConflictSide(
+            change.clone(),
+            ConflictSide::Ours,
+        ));
+        assert!(app.loading);
+        assert!(app.conflict_review.is_none());
+        let preview = ConflictSidePreview {
+            repository: app.snapshot.as_ref().unwrap().repository.clone(),
+            change,
+            side: ConflictSide::Ours,
+            oid: None,
+            executable: false,
+            content: ConflictSideContent::Deleted,
+        };
+        let _ = app.update(Message::ConflictSidePreviewed(Ok(preview)));
+        assert!(!app.loading);
+        assert!(app.detail.contains("index stage 2"));
+        assert!(app.detail.contains("Read-only preview"));
+        let _ = app.update(Message::ResolveConflict);
+        assert!(!app.loading);
+        assert_eq!(app.summary, "keep summary");
+        assert_eq!(app.description, "keep body");
+    }
+
+    #[test]
+    fn busy_side_preview_requests_do_not_redirect_the_active_operation() {
+        let mut app = app();
+        app.loading = true;
+        app.detail = "active operation".into();
+        let change = FileChange {
+            path: "file".into(),
+            original_path: None,
+            index: 'U',
+            worktree: 'U',
+        };
+        let _ = app.update(Message::ReviewConflictSide(change, ConflictSide::Theirs));
+        assert!(app.loading);
+        assert_eq!(app.detail, "active operation");
+        assert_eq!(app.summary, "keep summary");
     }
 }

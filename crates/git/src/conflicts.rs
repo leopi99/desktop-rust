@@ -1,6 +1,9 @@
 //! Review and stage externally edited text conflicts without replacing file contents.
 use super::{run_write, snapshot, WRITE_LOCK};
-use desktop_core::{ConflictContent, ConflictReview, FileChange};
+use desktop_core::{
+    ConflictContent, ConflictReview, ConflictSide, ConflictSideContent, ConflictSidePreview,
+    FileChange,
+};
 use std::{
     ffi::OsStr,
     fs::OpenOptions,
@@ -177,4 +180,115 @@ pub fn resolve_conflict(review: &ConflictReview) -> io::Result<String> {
         "Marked {} as resolved",
         review.change.path.display()
     ))
+}
+
+/// Inspect stage 2 (ours) or 3 (theirs) without changing the index or working file.
+/// Text retains a 64 KiB display prefix; binary blobs expose size only. Complete
+/// blobs are capped at 8 MiB. Missing sides represent deletion. Git stage meaning
+/// is preserved during rebase; this preview is not a resolution/write token.
+///
+/// # Errors
+///
+/// Returns an error for stale/non-conflicted paths, malformed/oversized index or
+/// blob output, unsupported entry modes, Git failure or Unix read deadlines.
+pub fn inspect_conflict_side(
+    path: &Path,
+    selected: &FileChange,
+    side: ConflictSide,
+) -> io::Result<ConflictSidePreview> {
+    let state = snapshot(path)?;
+    if !selected.is_conflicted()
+        || !state.changes.contains(selected)
+        || selected.original_path.is_some()
+    {
+        return Err(io::Error::other(
+            "Refresh and select a supported unmerged path before inspecting an index side",
+        ));
+    }
+    let root = &state.repository.path;
+    let raw = super::read_output::complete(
+        root,
+        &[
+            OsStr::new("ls-files"),
+            OsStr::new("--unmerged"),
+            OsStr::new("--stage"),
+            OsStr::new("-z"),
+            OsStr::new("--"),
+            selected.path.as_os_str(),
+        ],
+        64 * 1024,
+    )?;
+    let stage = match side {
+        ConflictSide::Ours => b'2',
+        ConflictSide::Theirs => b'3',
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut entry = None;
+    for record in raw
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let separator = record
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "Invalid unmerged index record")
+            })?;
+        let fields: Vec<_> = record[..separator].split(|byte| *byte == b' ').collect();
+        if fields.len() != 3
+            || !matches!(fields[2], b"1" | b"2" | b"3")
+            || !seen.insert(fields[2][0])
+            || super::file_path(&record[separator + 1..])? != selected.path
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid unmerged index entry",
+            ));
+        }
+        let oid = std::str::from_utf8(fields[1])
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        super::history::validate_oid(oid)?;
+        if fields[2][0] == stage {
+            if !matches!(fields[0], b"100644" | b"100755") {
+                return Err(io::Error::other(
+                    "Use Git to inspect symlink or submodule conflict sides",
+                ));
+            }
+            entry = Some((oid.to_owned(), fields[0] == b"100755"));
+        }
+    }
+    if seen.is_empty() {
+        return Err(io::Error::other("The selected path is no longer unmerged"));
+    }
+    let (oid, executable, content) = match entry {
+        None => (None, false, ConflictSideContent::Deleted),
+        Some((oid, executable)) => {
+            let bytes =
+                super::read_output::complete(root, &["cat-file", "blob", &oid], MAX_TEXT as usize)?;
+            let content = if bytes.contains(&0) {
+                ConflictSideContent::Binary { size: bytes.len() }
+            } else {
+                ConflictSideContent::Text {
+                    preview: String::from_utf8_lossy(&bytes[..bytes.len().min(64 * 1024)])
+                        .into_owned(),
+                    truncated: bytes.len() > 64 * 1024,
+                }
+            };
+            (Some(oid), executable, content)
+        }
+    };
+    if super::commit_basis(root)? != state.commit_basis || !super::changes(root)?.contains(selected)
+    {
+        return Err(io::Error::other(
+            "Conflict state changed while reading the side; refresh and review again",
+        ));
+    }
+    Ok(ConflictSidePreview {
+        repository: state.repository,
+        change: selected.clone(),
+        side,
+        oid,
+        executable,
+        content,
+    })
 }

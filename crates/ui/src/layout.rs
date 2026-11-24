@@ -1,5 +1,5 @@
 use super::{clip::clip, Desktop, Message, Panel};
-use desktop_core::{FileChange, MergeKind, RebaseKind, RemoteAction};
+use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
 use iced::widget::{button, column, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length};
 
@@ -35,7 +35,19 @@ impl Desktop {
                     if !self.loading {
                         review = review.on_press(Message::ReviewConflict(change.clone()));
                     }
-                    files = files.push(review);
+                    let mut ours = button("Preview ours");
+                    let mut theirs = button("Preview theirs");
+                    if !self.loading {
+                        ours = ours.on_press(Message::ReviewConflictSide(
+                            change.clone(),
+                            ConflictSide::Ours,
+                        ));
+                        theirs = theirs.on_press(Message::ReviewConflictSide(
+                            change.clone(),
+                            ConflictSide::Theirs,
+                        ));
+                    }
+                    files = files.push(review).push(ours).push(theirs);
                 } else {
                     files = files.push(row![stage, unstage].spacing(6));
                 }

@@ -210,6 +210,51 @@ pub struct ConflictReview {
     pub marker_count: usize,
 }
 
+/// Git index side, whose meaning follows Git also during a rebase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConflictSide {
+    /// Index stage 2; during rebase this is the rebased-onto side.
+    Ours,
+    /// Index stage 3; during rebase this is the replayed commit side.
+    Theirs,
+}
+
+/// Bounded display data from one immutable side of an unmerged index entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConflictSideContent {
+    /// Lossy UTF-8 text for display only; never a write path or resolution token.
+    Text {
+        /// Up to 64 KiB raw input converted for display.
+        preview: String,
+        /// Whether raw contents exceeded the displayed prefix.
+        truncated: bool,
+    },
+    /// Binary data is identified without rendering arbitrary bytes as text.
+    Binary {
+        /// Size of the complete bounded blob in bytes.
+        size: usize,
+    },
+    /// The selected index side has no entry, representing deletion.
+    Deleted,
+}
+
+/// Read-only index-side preview. This is not authorization to overwrite a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictSidePreview {
+    /// Repository whose index was inspected.
+    pub repository: Repository,
+    /// Exact selected porcelain record.
+    pub change: FileChange,
+    /// Git index side inspected.
+    pub side: ConflictSide,
+    /// Full immutable blob ID, or None for deletion.
+    pub oid: Option<String>,
+    /// Whether the selected regular-file entry is executable.
+    pub executable: bool,
+    /// Bounded display content or deletion metadata.
+    pub content: ConflictSideContent,
+}
+
 /// Expected shape of merging an observed local branch into the current branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeKind {
