@@ -55,7 +55,7 @@ relax the workspace or a whole production crate to make a check pass. An
 expectation that stops matching a violation must be removed, not silenced.
 
 The existing production exceptions are Unix process-group signalling in
-`crates/git/src/transfer.rs`, explicit developer CLI help, and capture-failure
+`crates/git/src/process.rs`, explicit developer CLI help, and capture-failure
 stderr reporting. Unsafe blocks explain the memory/FFI safety contract separately
 from broader process-lifecycle behavior. Unix-only expectations are conditional
 so they do not become unfulfilled on other platforms.

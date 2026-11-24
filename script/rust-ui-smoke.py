@@ -73,15 +73,33 @@ def main():
              "--capture", str(output / "git-missing.png")],
             env={**env, "PATH": str(output / "missing-tools")}, check=True, timeout=40,
         )
+        diagnostic_cases = ["git-missing"]
+        if os.name == "posix":
+            for case, body in [
+                ("git-timeout", "sleep 30"),
+                ("git-noisy", "while :; do printf '0123456789'; done"),
+            ]:
+                tools = Path(temporary) / case
+                tools.mkdir()
+                shim = tools / "git"
+                shim.write_text("#!/bin/sh\n" + body + "\n")
+                shim.chmod(0o755)
+                subprocess.run(
+                    [str(binary), "--panel", "git", "--size", args.size,
+                     "--capture", str(output / f"{case}.png")],
+                    env={**env, "PATH": str(tools) + os.pathsep + env.get("PATH", "")},
+                    check=True, timeout=40,
+                )
+                diagnostic_cases.append(case)
         after = signature()
         if before != after:
             raise RuntimeError("UI capture changed fixture files, configuration, status, refs, or index")
     (output / "report.json").write_text(json.dumps({
-        "size": args.size, "panels": panels, "diagnostic_cases": ["git-missing"],
+        "size": args.size, "panels": panels, "diagnostic_cases": diagnostic_cases,
         "fixture_unchanged": True,
         "note": "Rendered captures require human visual review; this is not an interaction or accessibility test.",
     }, indent=2) + "\n")
-    print(f"Captured {len(panels)} panels plus missing-Git diagnostics in {output}; fixture unchanged")
+    print(f"Captured {len(panels)} panels plus {len(diagnostic_cases)} diagnostic failures in {output}; fixture unchanged")
 
 
 if __name__ == "__main__":

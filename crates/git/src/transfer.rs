@@ -3,7 +3,6 @@ use std::{
     ffi::OsStr,
     io::{self, Read},
     path::Path,
-    process::{Child, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, MutexGuard, TryLockError,
@@ -113,34 +112,6 @@ fn drain(mut pipe: impl Read, control: TransferControl) -> io::Result<Vec<u8>> {
     }
 }
 
-#[cfg_attr(
-    unix,
-    expect(
-        unsafe_code,
-        reason = "Unix process-group signalling is isolated here; Git transport children must stop together"
-    )
-)]
-fn terminate(child: &mut Child) {
-    #[cfg(unix)]
-    {
-        // Every transfer starts its own process group, including Git's transport helpers.
-        let group = -(child.id() as libc::pid_t);
-        // SAFETY: kill takes integer identifiers, with no pointer/lifetime obligations.
-        // The group comes from our child started with process_group(0).
-        unsafe {
-            libc::kill(group, libc::SIGTERM);
-        }
-        thread::sleep(Duration::from_millis(250));
-        // SAFETY: same integer-only syscall contract; failure is tolerated because
-        // the direct child is killed and waited below as well.
-        unsafe {
-            libc::kill(group, libc::SIGKILL);
-        }
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 pub(super) fn run<S: AsRef<OsStr>>(
     path: &Path,
     args: &[S],
@@ -148,23 +119,14 @@ pub(super) fn run<S: AsRef<OsStr>>(
 ) -> io::Result<String> {
     control.check()?;
     let mut command = super::git_command(path);
-    command
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn()?;
-    let Some(stdout) = child.stdout.take() else {
-        terminate(&mut child);
+    command.args(args);
+    let mut child = super::process::spawn(&mut command)?;
+    let Some(stdout) = child.take_stdout() else {
+        super::process::terminate(&mut child);
         return Err(io::Error::other("Git stdout pipe was not created"));
     };
-    let Some(stderr) = child.stderr.take() else {
-        terminate(&mut child);
+    let Some(stderr) = child.take_stderr() else {
+        super::process::terminate(&mut child);
         return Err(io::Error::other("Git stderr pipe was not created"));
     };
     let out_control = control.clone();
@@ -177,7 +139,7 @@ pub(super) fn run<S: AsRef<OsStr>>(
             match child.try_wait() {
                 Ok(result) => status = result,
                 Err(error) => {
-                    terminate(&mut child);
+                    super::process::terminate(&mut child);
                     break Err(error);
                 }
             }
@@ -188,7 +150,7 @@ pub(super) fn run<S: AsRef<OsStr>>(
             }
         }
         if let Err(error) = control.check() {
-            terminate(&mut child);
+            super::process::terminate(&mut child);
             break Err(error);
         }
         thread::sleep(Duration::from_millis(20));

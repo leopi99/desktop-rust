@@ -2,6 +2,7 @@
 mod branches;
 mod conflicts;
 pub use conflicts::{inspect_conflict, resolve_conflict};
+mod process;
 mod runtime;
 pub use runtime::git_runtime;
 mod history;
