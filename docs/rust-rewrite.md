@@ -113,6 +113,17 @@ confirmation have been captured and visually inspected on Linux using the
 software renderer at 960×640 and 1200×800. Interactive keyboard and complete
 end-to-end UI deletion checks remain outstanding.
 
+## Git pipe-reader lifecycle
+
+Transfers and bounded Unix reads share a reader-pair owner. Both pipe threads
+start through fallible builders; failure to start either reader stops/reaps the
+managed child and waits for any started reader. At completion both workers are
+joined before a reader panic or I/O error is returned. Transfers retain their
+64 KiB per-stream diagnostic tails and 16 KiB live progress limit. Linux tests
+cover inherited pipes after Git exits, timeout/cancellation and a subsequent retry.
+Other whole-output Git adapters still require lifecycle/resource review, and
+Windows still needs native process-tree/inherited-pipe cleanup (PLAT-01).
+
 ## Git runtime diagnostics
 
 The Git panel shows the version reported by the system Git resolved through PATH.

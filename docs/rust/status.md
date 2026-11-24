@@ -35,6 +35,7 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - Explicit agent rules, this progress index and an ordered backlog.
 - Unix version-probe limits and shared managed-child setup/termination, with Linux process, output and retry regressions in `ca5687095f`.
 - Unix historical-read deadlines, bounded complete metadata/file lists and streamed message/patch prefix capture in `5b24281183`, including late-error and multi-megabyte fixture coverage.
+- Shared fallible reader-pair startup and joining in `3e574c3f75`: child cleanup on thread-start failure, both workers awaited even on reader failure, and transfer inherited-pipe/retry regressions.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
@@ -48,7 +49,7 @@ coherent follow-ups. Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 250 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 256 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -65,6 +66,12 @@ or establish accessibility parity. Native Windows deadline/tree cleanup remains
 pending.
 No successful test count substitutes for the required source and human review.
 
+On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.
+Use the complete local Rust quality command, npm lint and upstream ledger/tests
+for current evidence; no GitHub CI result is claimed for this increment. Keep
+workflow definitions and quality requirements in place. Recheck hosted CI and
+scheduled discovery/watchdog execution when the quota becomes available.
+
 ## Upstream checkpoint
 
 Detected: `release-3.6.11`, commit `0102f49aa6c8c554de558299f31b6129b502a2fe`.
@@ -73,6 +80,12 @@ The 3.6.10-to-3.6.11 interval is triaged in
 Git distribution, original hotfix runners and upstream release metadata.
 The initial **full baseline** remains pending-analysis; analyzed/parity are unset.
 Discovery and watchdog manual success do not prove future scheduled execution.
+Local discovery on 2026-11-24 at 16:32 UTC succeeded with no new stable releases;
+the baseline SHA remained unchanged. Temporary artifacts are in
+`/tmp/desktop-rust-upstream-local-20261124-readers` on the verification machine;
+these are local evidence, not uploaded Actions artifacts or a parity assessment.
+Follow [the local discovery procedure](../upstream-maintenance.md) weekly while
+hosted execution is unavailable.
 
 ## Keeping this index useful
 

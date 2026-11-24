@@ -31,6 +31,24 @@ failure stops the run without publishing new state. Fix the cause and rerun; do
 not move checkpoints to conceal a failed check. The discovery report is evidence
 for review, not a completed classification or a claim of Rust parity.
 
+### Temporary Actions quota exhaustion
+
+On 2026-11-24 the owner reported the fork's Actions minutes exhausted until
+December 2026. Until quota returns, run the local discovery commands above at the
+weekly cadence, choosing a fresh output directory each time. Review `check.json`,
+`report.md` and any proposed ledger/patches; local success does not update the
+committed checkpoints or prove that the hosted watchdog ran. Record the check
+time and result in [Rust status](rust/status.md), retaining artifacts for review.
+This procedure still needs a local machine and network access; it is not an
+automatically scheduled fallback.
+
+Local discovery at 2026-11-24 16:32 UTC found no new stable release and retained
+`release-3.6.11` at `0102f49aa6c8c554de558299f31b6129b502a2fe`.
+After quota returns, verify discovery and watchdog execution and examine missed
+releases before relying on their schedules. Keep required checks and workflow
+policy intact; local verification does not silently satisfy a required hosted
+check or authorize merging.
+
 ## Ledger and review gates
 
 `upstream/state.json` uses schema version 1 and fixes the source repository to
