@@ -7,6 +7,9 @@ use std::{
 #[cfg(unix)]
 use std::{thread, time::Duration};
 
+mod readers;
+pub(super) use readers::Readers;
+
 #[cfg(unix)]
 mod bounded;
 #[cfg(unix)]

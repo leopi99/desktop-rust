@@ -93,38 +93,14 @@ fn capture_output(
 ) -> io::Result<PrefixOutput> {
     let started = Instant::now();
     let mut child = super::spawn(&mut command)?;
-    let Some(stdout) = child.take_stdout() else {
-        super::terminate(&mut child);
-        return Err(io::Error::other("Git stdout pipe was not created"));
-    };
-    let Some(stderr) = child.take_stderr() else {
-        super::terminate(&mut child);
-        return Err(io::Error::other("Git stderr pipe was not created"));
-    };
     let overflow = Arc::new(AtomicBool::new(false));
     let out_overflow = overflow.clone();
     let err_overflow = overflow.clone();
-    let out = match thread::Builder::new()
-        .name("git-output-stdout".into())
-        .spawn(move || drain(stdout, limits.stdout, &out_overflow, policy))
-    {
-        Ok(reader) => reader,
-        Err(error) => {
-            super::terminate(&mut child);
-            return Err(error);
-        }
-    };
-    let err = match thread::Builder::new()
-        .name("git-output-stderr".into())
-        .spawn(move || drain(stderr, limits.stderr, &err_overflow, OverflowPolicy::Reject))
-    {
-        Ok(reader) => reader,
-        Err(error) => {
-            super::terminate(&mut child);
-            let _ = out.join();
-            return Err(error);
-        }
-    };
+    let readers = super::Readers::start(
+        &mut child,
+        move |stdout| drain(stdout, limits.stdout, &out_overflow, policy),
+        move |stderr| drain(stderr, limits.stderr, &err_overflow, OverflowPolicy::Reject),
+    )?;
     let mut status = None;
     let outcome = loop {
         if overflow.load(Ordering::Acquire) {
@@ -148,22 +124,16 @@ fn capture_output(
             }
         }
         if let Some(status) = status {
-            if out.is_finished() && err.is_finished() {
+            if readers.is_finished() {
                 break Ok(status);
             }
         }
         thread::sleep(Duration::from_millis(10));
     };
     // Reap/drain before returning, so retry does not leave pipe readers behind.
-    let stdout = out
-        .join()
-        .map_err(|_| io::Error::other("Git stdout reader failed"));
-    let stderr = err
-        .join()
-        .map_err(|_| io::Error::other("Git stderr reader failed"));
+    let captured = readers.join();
     let status = outcome?;
-    let stdout = stdout??;
-    let stderr = stderr??;
+    let (stdout, stderr) = captured?;
     // Catch overflow even when a short-lived command exits between controller polls.
     if (stdout.exceeded && policy == OverflowPolicy::Reject) || stderr.exceeded {
         return Err(limit_error());
