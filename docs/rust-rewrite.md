@@ -22,9 +22,9 @@ a 30-second deadline and a 16 KiB stderr cap; excess stdout is drained/discarded
 and the final exit status is checked before displaying the prefix. UTF-8
 replacement can enlarge the displayed byte size. This limits parent capture,
 not Git's own memory. Windows still buffers the full patch before clipping and
-has no equivalent patch deadline (PLAT-01). The preceding status/freshness read
-still uses legacy whole-output capture, so this is not a deadline for the entire
-`diff` operation. Selecting Stage still stages the complete current file.
+has no equivalent patch deadline (PLAT-01). The preceding status read has its
+own 8 MiB capture cap and Unix deadline. These separate limits are not one
+deadline for the entire `diff` operation. Selecting Stage still stages the complete current file.
 Untracked text files have a preview up to 1 MiB; binary files are identified,
 and symbolic links show their target rather than following it. Refresh reloads
 status and history. Paths retain their filesystem encoding on Unix.
@@ -121,6 +121,36 @@ branch and never sends the deletion action. The updated resting panel and
 confirmation have been captured and visually inspected on Linux using the
 software renderer at 960×640 and 1200×800. Interactive keyboard and complete
 end-to-end UI deletion checks remain outstanding.
+
+## Complete state and freshness scans
+
+Core snapshot/freshness reads reject incomplete output instead of parsing a prefix.
+Their raw stdout limits are:
+
+| Read | Limit |
+| --- | --- |
+| Human/porcelain status (each command) | 8 MiB |
+| Complete staged-index entries | 16 MiB |
+| Local branch listing | 4 MiB |
+| HEAD/symbolic ref, repository root and merge/rebase metadata paths | 64 KiB each |
+
+On Unix each migrated subprocess has a 30-second deadline and a 16 KiB stderr cap,
+using managed process-group cleanup and joined readers. Windows validates these
+limits after whole-output buffering and still lacks equivalent memory/deadline
+bounds. Limits cover captured bytes, not Git's internal memory, parsed-model
+allocations or one overall snapshot deadline.
+
+HEAD and branch reads propagate failures. Only a quiet, empty exit 1 can denote
+absence for the selected Git commands. A missing HEAD commit is considered unborn
+only when a symbolic HEAD exists and its target ref is absent; malformed refs,
+missing commit objects and detached HEAD without a valid commit fail. Full native
+ref names and full commit IDs remain part of the freshness observation. These
+sequential reads do not fence concurrent external clients.
+
+Regression fixtures exceed the index/status and branch-list caps, verify refused
+commit/staging with unchanged index/HEAD/working files, and exercise recovery after
+restoring only the disposable fixture. Auxiliary remote/stash/config/worktree
+reads and bespoke merge/rebase readers still require migration under R-05/R-06.
 
 ## Git pipe-reader lifecycle
 

@@ -38,6 +38,7 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - Shared fallible reader-pair startup and joining in `3e574c3f75`: child cleanup on thread-start failure, both workers awaited even on reader failure, and transfer inherited-pipe/retry regressions.
 - Tracked staged/unstaged patch limits in `52eb1e12b6`, reusing read-only capture and preserving full-file staging after a clipped preview.
 - Concurrent local-write pipe draining in `bff5464a57`, with 64 KiB per-stream diagnostic tails and regressions for multi-megabyte input/output, early stdin closure and noisy real hooks.
+- Core status/index/HEAD/path and branch-list capture limits in `e6ecdaa16d`, including explicit quiet absent-ref handling, commit-object validation and refusal of writes after oversized scans.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
@@ -45,17 +46,19 @@ work before the next milestone PR. The active branch stays `quality/rust-foundat
 for this reliability batch; continue from it rather than dropping its unmerged
 policy by starting again from `development`. Runtime/process hardening is in
 progress; broader adapter child-lifecycle work and UI handler separation remain
-coherent follow-ups. Complete repository scans (R-05) and bespoke merge/rebase
-runners still use whole-output capture. The migrated local-write runner (R-06)
+coherent follow-ups. R-05 now covers the core snapshot/freshness scans; auxiliary
+remote/stash/config/worktree reads and bespoke merge/rebase runners still use
+whole-output capture. The migrated local-write runner (R-06)
 has no automatic deadline/cancellation for hooks, signing or inherited pipes.
-Patch limits do not bound the preceding status read or every Git command.
+Status and patch scans each have their own limits; this is not one overall
+operation deadline or a bound on every Git command.
 Default-branch CI activation follows the batch merge.
 
 ## Evidence and confidence
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 266 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 271 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -64,7 +67,9 @@ truncation boundaries, late failures, stderr overflow and deadlines. Working-dif
 tests cover large staged/unstaged patches, unchanged data and complete staging
 after clipping, plus unborn/native-path cases. Local-write tests verify bounded
 tails, full input delivery, unchanged user data after hook rejection and retry;
-real Git routes hook stdout through stderr. Record fresh results for later behavior changes; these counts are dated observations, not a
+real Git routes hook stdout through stderr. Scan regressions exercise oversized
+index/status/branch data, refused writes and recovery; missing/corrupt HEAD objects
+and non-absence process failures are rejected. Record fresh results for later behavior changes; these counts are dated observations, not a
 permanent coverage guarantee.
 
 The offline smoke fixture verifies its files, refs, index and config remain
