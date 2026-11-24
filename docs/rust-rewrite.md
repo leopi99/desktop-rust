@@ -158,11 +158,23 @@ committed diff, independent of current staged/working-tree edits.
 Root commits are compared with an empty tree; merge commits use their first parent.
 Renames retain both paths, including non-UTF-8 paths on Unix. External diff and
 textconv helpers are disabled. Commit message previews are limited to 64 KiB and
-committed diff previews to 256 KiB. These are display limits; Git output is currently
-read into memory before preview truncation. Large-repository virtualization and
-streamed historical diffs remain planned. Commit controls are hidden in History;
-switch to Changes to prepare a new commit. Resting layouts have been visually
-checked; interactive history navigation QA remains outstanding.
+committed diff previews to 256 KiB of raw output, plus a truncation marker; UTF-8
+replacement during display can increase the rendered byte size.
+
+On Unix, each historical Git child has a 30-second deadline and a 16 KiB stderr
+cap. Complete metadata is limited to 1 MiB per page/detail read; changed-file lists
+to 4 MiB and 10,000 files. Oversized structured results fail rather than returning
+an incomplete list. Message/patch readers retain only the prefix and drain/discard
+the rest until EOF, checking the final exit status before displaying a preview.
+Selecting a diff does not reread the commit body. These bounds cover captured
+output and command lifetime, not Git's own internal memory. Process-group cleanup
+also covers inherited pipes; this path is tested on Linux.
+
+Windows still buffers whole output before checking metadata/display limits and
+has no equivalent per-read deadline (PLAT-01). Large-repository virtualization
+remains planned. Commit controls are hidden in History; switch to Changes to
+prepare a new commit. Resting layouts have been visually checked; interactive
+history navigation QA remains outstanding.
 
 ## Development checks
 
