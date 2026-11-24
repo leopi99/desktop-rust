@@ -27,6 +27,7 @@ impl Desktop {
                     return self.update(Message::ShowHistory(panel == Panel::History));
                 }
                 self.conflict_review = None;
+                self.side_resolution_review = None;
                 self.merge_preview = None;
                 self.rebase_preview = None;
             }

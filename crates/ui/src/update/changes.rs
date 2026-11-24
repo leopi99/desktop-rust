@@ -1,7 +1,8 @@
 //! Guarded changes state transitions.
 use crate::{
     worker, ConflictContent, ConflictReview, ConflictSide, ConflictSideContent,
-    ConflictSidePreview, Desktop, FileChange, FileDiff, Message, Operation,
+    ConflictSidePreview, ConflictSideResolutionReview, ConflictWorkingContent, Desktop, FileChange,
+    FileDiff, Message, Operation,
 };
 use iced::Task;
 
@@ -11,6 +12,10 @@ pub(super) enum Event {
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
     ReviewConflictSide(FileChange, ConflictSide),
+    RequestConflictSideResolution(FileChange, ConflictSide),
+    ConflictSideResolutionReviewed(Result<Box<ConflictSideResolutionReview>, String>),
+    ApplyConflictSideResolution,
+    CancelConflictSideResolution,
     ConflictSidePreviewed(Result<ConflictSidePreview, String>),
     ConflictReviewed(Result<Box<ConflictReview>, String>),
     ResolveConflict,
@@ -29,6 +34,7 @@ impl Desktop {
                     let path = snapshot.repository.path.clone();
                     self.loading = true;
                     self.conflict_review = None;
+                    self.side_resolution_review = None;
                     self.detail = format!("Loading {}…", change.path.display());
                     return worker(
                         move || desktop_git::diff(&path, &change),
@@ -59,6 +65,7 @@ impl Desktop {
                 if let Some(snapshot) = &self.snapshot {
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
+                    self.side_resolution_review = None;
                     self.loading = true;
                     self.detail = format!("Reviewing conflict: {}", change.path.display());
                     return worker(
@@ -71,6 +78,7 @@ impl Desktop {
                 if let Some(snapshot) = &self.snapshot {
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
+                    self.side_resolution_review = None;
                     self.loading = true;
                     self.detail = String::from("Loading read-only index side…");
                     return worker(
@@ -79,9 +87,50 @@ impl Desktop {
                     );
                 }
             }
+            Event::RequestConflictSideResolution(change, side) if !self.loading => {
+                if let Some(snapshot) = &self.snapshot {
+                    let path = snapshot.repository.path.clone();
+                    self.conflict_review = None;
+                    self.side_resolution_review = None;
+                    self.loading = true;
+                    self.detail = String::from("Reviewing side replacement/deletion…");
+                    return worker(
+                        move || desktop_git::review_conflict_side_resolution(&path, &change, side),
+                        Message::ConflictSideResolutionReviewed,
+                    );
+                }
+            }
+            Event::ConflictSideResolutionReviewed(result) => {
+                self.loading = false;
+                self.conflict_review = None;
+                self.side_resolution_review = None;
+                match result {
+                    Ok(review) => {
+                        let current = working_display(&review.working);
+                        let target = working_display(&review.selected);
+                        self.detail = format!("Review {:?} side for {}\nBlob: {}\nConfirming will replace or delete the current working file and stage only this path.\nDuring rebase, ours is rebased-onto; theirs is the replayed commit.\nConfigured Git checkout hooks remain active.\n\nCurrent working version:\n{}\n\nSelected index version:\n{}", review.preview.side, review.preview.change.path.display(), review.preview.oid.as_deref().unwrap_or("(deleted)"), current, target);
+                        self.side_resolution_review = Some(std::sync::Arc::new(*review));
+                    }
+                    Err(error) => self.detail = format!("Unable to review side choice: {error}"),
+                }
+            }
+            Event::ApplyConflictSideResolution if !self.loading => {
+                if let Some(review) = self.side_resolution_review.take() {
+                    self.loading = true;
+                    self.notice = String::from("Applying confirmed side choice…");
+                    return worker(
+                        move || desktop_git::apply_conflict_side_resolution(&review),
+                        |result| Message::Wrote(Operation::ResolveConflict, result),
+                    );
+                }
+            }
+            Event::CancelConflictSideResolution if !self.loading => {
+                self.side_resolution_review = None
+            }
             Event::ConflictSidePreviewed(result) => {
                 self.loading = false;
                 self.conflict_review = None;
+                self.side_resolution_review = None;
                 self.detail = match result {
                     Ok(preview) => {
                         let side = match preview.side {
@@ -110,6 +159,7 @@ impl Desktop {
                 };
             }
             Event::ConflictReviewed(result) => {
+                self.side_resolution_review = None;
                 self.loading = false;
                 match result {
                     Ok(review) => {
@@ -137,6 +187,7 @@ impl Desktop {
                     }
                     Err(error) => {
                         self.conflict_review = None;
+                        self.side_resolution_review = None;
                         self.detail = format!("Unable to review conflict: {error}");
                     }
                 }
@@ -190,6 +241,9 @@ impl Desktop {
             Event::Select(..)
             | Event::ReviewConflict(..)
             | Event::ReviewConflictSide(..)
+            | Event::RequestConflictSideResolution(..)
+            | Event::ApplyConflictSideResolution
+            | Event::CancelConflictSideResolution
             | Event::ResolveConflict
             | Event::Stage(..)
             | Event::Unstage(..)
@@ -221,5 +275,32 @@ impl Desktop {
             },
             |result| Message::Wrote(Operation::Index, result),
         )
+    }
+}
+
+fn working_display(content: &ConflictWorkingContent) -> String {
+    match content {
+        ConflictWorkingContent::Deleted => String::from("(file deleted)"),
+        ConflictWorkingContent::File { bytes, executable } => {
+            let preview = if bytes.contains(&0) {
+                String::from("Binary data; contents not rendered")
+            } else {
+                format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&bytes[..bytes.len().min(64 * 1024)]),
+                    if bytes.len() > 64 * 1024 {
+                        "\n[Preview truncated]"
+                    } else {
+                        ""
+                    }
+                )
+            };
+            format!(
+                "{} bytes; executable: {}\n{}",
+                bytes.len(),
+                executable,
+                preview
+            )
+        }
     }
 }

@@ -61,6 +61,18 @@ impl Desktop {
             Message::ReviewConflictSide(change, side) => {
                 self.update_changes(changes::Event::ReviewConflictSide(change, side))
             }
+            Message::RequestConflictSideResolution(change, side) => {
+                self.update_changes(changes::Event::RequestConflictSideResolution(change, side))
+            }
+            Message::ConflictSideResolutionReviewed(result) => self.update_changes(
+                changes::Event::ConflictSideResolutionReviewed(result.map(Box::new)),
+            ),
+            Message::ApplyConflictSideResolution => {
+                self.update_changes(changes::Event::ApplyConflictSideResolution)
+            }
+            Message::CancelConflictSideResolution => {
+                self.update_changes(changes::Event::CancelConflictSideResolution)
+            }
             Message::ConflictSidePreviewed(result) => {
                 self.update_changes(changes::Event::ConflictSidePreviewed(result))
             }

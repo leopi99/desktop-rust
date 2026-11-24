@@ -255,6 +255,38 @@ pub struct ConflictSidePreview {
     pub content: ConflictSideContent,
 }
 
+/// Complete regular-file contents retained for conflict-side freshness checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConflictWorkingContent {
+    /// Complete bytes, including binary data, and the executable flag.
+    File {
+        /// Captured bytes, limited to 8 MiB by the Git adapter.
+        bytes: Vec<u8>,
+        /// Whether executable permission was observed.
+        executable: bool,
+    },
+    /// No working file or selected index entry exists.
+    Deleted,
+}
+
+/// A side choice reviewed before explicit overwrite/deletion and staging.
+/// Read-only side previews alone cannot be passed to the write API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictSideResolutionReview {
+    /// Side, immutable object and display metadata selected for this choice.
+    pub preview: ConflictSidePreview,
+    /// Index, HEAD and sequencer state captured for this review.
+    pub basis: CommitBasis,
+    /// Complete observed working-file contents or absence.
+    pub working: ConflictWorkingContent,
+    /// Complete selected blob contents or deletion.
+    pub selected: ConflictWorkingContent,
+    /// Effective conversion and conflict-marker attributes.
+    pub attributes: Vec<u8>,
+    /// Relevant non-secret Git checkout/staging settings.
+    pub settings: Vec<u8>,
+}
+
 /// Expected shape of merging an observed local branch into the current branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeKind {

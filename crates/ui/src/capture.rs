@@ -1,5 +1,5 @@
 //! Developer launch options and captures of the application's own window.
-use super::{Desktop, Message, Panel};
+use super::{ConflictSide, Desktop, Message, Panel};
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
@@ -13,6 +13,7 @@ pub(super) struct Start {
     pub(super) capture: Option<PathBuf>,
     panel: Panel,
     review_delete: bool,
+    review_side: Option<ConflictSide>,
     pub(super) size: iced::Size,
 }
 
@@ -27,12 +28,13 @@ impl Start {
             capture: None,
             panel: Panel::Changes,
             review_delete: false,
+            review_side: None,
             size: iced::Size::new(1200.0, 800.0),
         };
         let mut args = args.into_iter();
         while let Some(flag) = args.next() {
             if flag == "--help" {
-                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|branch-delete-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
+                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
                 return Ok(None);
             }
             if !["--repository", "--panel", "--size", "--capture"]
@@ -47,8 +49,15 @@ impl Start {
                 Some("--capture") => start.capture = Some(value.into()),
                 Some("--panel") => {
                     start.review_delete = value == "branch-delete-review";
+                    start.review_side = match value.to_str() {
+                        Some("conflict-ours-review") => Some(ConflictSide::Ours),
+                        Some("conflict-theirs-review") => Some(ConflictSide::Theirs),
+                        _ => None,
+                    };
                     start.panel = match value.to_str() {
-                        Some("changes") => Panel::Changes,
+                        Some("changes" | "conflict-ours-review" | "conflict-theirs-review") => {
+                            Panel::Changes
+                        }
                         Some("history") => Panel::History,
                         Some("branches" | "branch-delete-review") => Panel::Branches,
                         Some("remotes") => Panel::Remotes,
@@ -73,8 +82,10 @@ impl Start {
                 _ => unreachable!(),
             }
         }
-        if start.review_delete && (start.capture.is_none() || start.repository.is_none()) {
-            return Err("branch-delete-review requires --repository and --capture".into());
+        if (start.review_delete || start.review_side.is_some())
+            && (start.capture.is_none() || start.repository.is_none())
+        {
+            return Err("Review captures require --repository and --capture".into());
         }
         if start.capture.as_ref().is_some_and(|path| path.exists()) {
             return Err("Capture output already exists; choose a fresh path".into());
@@ -110,6 +121,24 @@ impl Start {
                 let remote = snapshot.remotes.first().cloned();
                 app.select_remote(remote);
             }
+        }
+        if let Some(side) = self.review_side {
+            let snapshot = app
+                .snapshot
+                .as_ref()
+                .ok_or("Conflict review needs a repository")?;
+            let change = snapshot
+                .changes
+                .iter()
+                .find(|change| change.is_conflicted())
+                .ok_or("Conflict review capture needs an unmerged file")?;
+            let review = desktop_git::review_conflict_side_resolution(
+                &snapshot.repository.path,
+                change,
+                side,
+            )?;
+            // Prepare only; never send ApplyConflictSideResolution during capture.
+            let _ = app.update(Message::ConflictSideResolutionReviewed(Ok(review)));
         }
         if self.review_delete {
             let branch = app
@@ -169,6 +198,34 @@ mod tests {
             vec!["--size", "1200x599"],
         ] {
             assert!(parse(&args).is_err(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn conflict_review_capture_requires_explicit_repository_and_capture() {
+        for panel in ["conflict-ours-review", "conflict-theirs-review"] {
+            assert!(parse(&["--panel", panel]).is_err());
+            assert!(parse(&["--panel", panel, "--repository", "/tmp/repo"]).is_err());
+            assert!(parse(&["--panel", panel, "--capture", "/tmp/no-repo.png"]).is_err());
+            let start = parse(&[
+                "--panel",
+                panel,
+                "--repository",
+                "/tmp/repo",
+                "--capture",
+                "/tmp/review-new.png",
+            ])
+            .unwrap()
+            .unwrap();
+            assert_eq!(start.panel, Panel::Changes);
+            assert_eq!(
+                start.review_side,
+                Some(if panel == "conflict-ours-review" {
+                    ConflictSide::Ours
+                } else {
+                    ConflictSide::Theirs
+                })
+            );
         }
     }
 

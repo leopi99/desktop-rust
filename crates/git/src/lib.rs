@@ -3,7 +3,10 @@ mod basis;
 use basis::commit_basis;
 mod branches;
 mod conflicts;
-pub use conflicts::{inspect_conflict, inspect_conflict_side, resolve_conflict};
+pub use conflicts::{
+    apply_conflict_side_resolution, inspect_conflict, inspect_conflict_side, resolve_conflict,
+    review_conflict_side_resolution,
+};
 mod process;
 mod read_output;
 mod runtime;

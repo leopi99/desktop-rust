@@ -2,7 +2,7 @@
 use super::{run_write, snapshot, WRITE_LOCK};
 use desktop_core::{
     ConflictContent, ConflictReview, ConflictSide, ConflictSideContent, ConflictSidePreview,
-    FileChange,
+    ConflictSideResolutionReview, ConflictWorkingContent, FileChange,
 };
 use std::{
     ffi::OsStr,
@@ -13,7 +13,7 @@ use std::{
 
 const MAX_TEXT: u64 = 8 * 1024 * 1024;
 
-fn content(root: &Path, relative: &Path) -> io::Result<ConflictContent> {
+fn working_content(root: &Path, relative: &Path) -> io::Result<ConflictWorkingContent> {
     let mut parent = relative.parent();
     while let Some(component) = parent.filter(|p| !p.as_os_str().is_empty()) {
         match std::fs::symlink_metadata(root.join(component)) {
@@ -32,7 +32,7 @@ fn content(root: &Path, relative: &Path) -> io::Result<ConflictContent> {
     let metadata = match std::fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(ConflictContent::Deleted)
+            return Ok(ConflictWorkingContent::Deleted)
         }
         Err(error) => return Err(error),
     };
@@ -57,7 +57,7 @@ fn content(root: &Path, relative: &Path) -> io::Result<ConflictContent> {
     }
     let mut bytes = Vec::new();
     file.take(MAX_TEXT + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_TEXT || bytes.contains(&0) {
+    if bytes.len() as u64 > MAX_TEXT {
         return Err(io::Error::other(
             "Resolve binary or oversized file conflicts using Git",
         ));
@@ -69,7 +69,21 @@ fn content(root: &Path, relative: &Path) -> io::Result<ConflictContent> {
     };
     #[cfg(not(unix))]
     let executable = false;
-    Ok(ConflictContent::Text { bytes, executable })
+    Ok(ConflictWorkingContent::File { bytes, executable })
+}
+
+fn content(root: &Path, relative: &Path) -> io::Result<ConflictContent> {
+    match working_content(root, relative)? {
+        ConflictWorkingContent::Deleted => Ok(ConflictContent::Deleted),
+        ConflictWorkingContent::File { bytes, executable } => {
+            if bytes.contains(&0) {
+                return Err(io::Error::other(
+                    "Resolve binary or oversized file conflicts using Git",
+                ));
+            }
+            Ok(ConflictContent::Text { bytes, executable })
+        }
+    }
 }
 
 fn marker_size(root: &Path, path: &Path) -> io::Result<usize> {
@@ -291,4 +305,226 @@ pub fn inspect_conflict_side(
         executable,
         content,
     })
+}
+
+fn side_policy(root: &Path, path: &Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
+    let names = [
+        "filter",
+        "ident",
+        "working-tree-encoding",
+        "text",
+        "eol",
+        "conflict-marker-size",
+    ];
+    let mut args = vec![OsStr::new("check-attr"), OsStr::new("-z")];
+    args.extend(names.iter().map(OsStr::new));
+    args.extend([OsStr::new("--"), path.as_os_str()]);
+    let attributes = super::read_output::complete(root, &args, 64 * 1024)?;
+    let fields: Vec<_> = attributes
+        .strip_suffix(b"\0")
+        .unwrap_or(&attributes)
+        .split(|byte| *byte == 0)
+        .collect();
+    if fields.len() != names.len() * 3 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid side-resolution attributes",
+        ));
+    }
+    for (record, name) in fields.as_chunks::<3>().0.iter().zip(names) {
+        if super::file_path(record[0])? != path || record[1] != name.as_bytes() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid side-resolution attribute record",
+            ));
+        }
+        if name != "conflict-marker-size" && !matches!(record[2], b"unspecified" | b"unset") {
+            return Err(io::Error::other(
+                "Use Git for side selection with filters, text/EOL, ident or encoding conversions",
+            ));
+        }
+    }
+    let autocrlf = super::read_output::optional(
+        root,
+        &["config", "--null", "--type=bool", "--get", "core.autocrlf"],
+        64 * 1024,
+    ).map_err(|error| io::Error::new(error.kind(), format!("Cannot establish side-selection line-ending policy; use Git for conversion settings: {error}")))?;
+    if autocrlf.as_deref().is_some_and(|value| value != b"false\0") {
+        return Err(io::Error::other(
+            "Use Git for side selection with automatic line-ending conversion",
+        ));
+    }
+    let settings = super::read_output::optional(root, &["config", "--null", "--get-regexp", "^core\\.(autocrlf|eol|safecrlf|filemode|checkroundtripencoding|sparsecheckout|sparsecheckoutcone|hookspath)$"], 64 * 1024)?.unwrap_or_default();
+    Ok((attributes, settings))
+}
+
+/// Review an explicit side replacement/deletion without writing. Only regular
+/// files up to 8 MiB and paths without checkout conversions are supported.
+/// Externally resolved marker-free UU/AA text must use ordinary conflict review.
+///
+/// # Errors
+///
+/// Returns an error for unsupported/changed state, conversions, externally resolved
+/// text, oversized data or Git/I/O failure. No destination is overwritten here.
+pub fn review_conflict_side_resolution(
+    path: &Path,
+    selected: &FileChange,
+    side: ConflictSide,
+) -> io::Result<ConflictSideResolutionReview> {
+    let preview = inspect_conflict_side(path, selected, side)?;
+    let root = &preview.repository.path;
+    let basis = super::commit_basis(root)?;
+    let working = working_content(root, &selected.path)?;
+    if matches!((selected.index, selected.worktree), ('U', 'U') | ('A', 'A')) {
+        let externally_resolved = match &working {
+            ConflictWorkingContent::Deleted => true,
+            ConflictWorkingContent::File { bytes, .. } => {
+                !bytes.contains(&0) && count_markers(bytes, marker_size(root, &selected.path)?) == 0
+            }
+        };
+        if externally_resolved {
+            return Err(io::Error::other("The file appears externally resolved; review and stage the edited contents instead"));
+        }
+    }
+    let (attributes, settings) = side_policy(root, &selected.path)?;
+    let target = match &preview.oid {
+        None => ConflictWorkingContent::Deleted,
+        Some(oid) => ConflictWorkingContent::File {
+            bytes: super::read_output::complete(
+                root,
+                &["cat-file", "blob", oid],
+                MAX_TEXT as usize,
+            )?,
+            executable: preview.executable,
+        },
+    };
+    if inspect_conflict_side(root, selected, side)? != preview
+        || super::commit_basis(root)? != basis
+        || working_content(root, &selected.path)? != working
+    {
+        return Err(io::Error::other(
+            "Conflict changed during side review; review again",
+        ));
+    }
+    Ok(ConflictSideResolutionReview {
+        preview,
+        basis,
+        working,
+        selected: target,
+        attributes,
+        settings,
+    })
+}
+
+/// Apply only an explicitly confirmed fresh side review, replacing/deleting the
+/// named working file and staging it. Git's configured checkout hooks remain active.
+/// Preflight checks do not fence concurrent external clients. Compound-operation
+/// failures can leave the working file changed; inspect/refresh before recovery.
+///
+/// # Errors
+///
+/// Returns an error for stale/unsupported reviews, Git checkout/remove/add failure
+/// or a failed postcondition. No automatic rollback overwrites subsequent edits.
+pub fn apply_conflict_side_resolution(review: &ConflictSideResolutionReview) -> io::Result<String> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("Write lock poisoned"))?;
+    let root = &review.preview.repository.path;
+    let selected = &review.preview.change;
+    if review_conflict_side_resolution(root, selected, review.preview.side)? != *review {
+        return Err(io::Error::other(
+            "File, index, HEAD, attributes or side changed; review again before applying",
+        ));
+    }
+    let result = if review.preview.oid.is_none() {
+        run_write(
+            root,
+            &[
+                OsStr::new("rm"),
+                OsStr::new("--"),
+                selected.path.as_os_str(),
+            ],
+            None,
+        )
+    } else {
+        let side = match review.preview.side {
+            ConflictSide::Ours => "--ours",
+            ConflictSide::Theirs => "--theirs",
+        };
+        run_write(
+            root,
+            &[
+                OsStr::new("checkout"),
+                OsStr::new(side),
+                OsStr::new("--"),
+                selected.path.as_os_str(),
+            ],
+            None,
+        ).map_err(|error| io::Error::new(error.kind(), format!("Side checkout failed; working file may have changed, refresh and inspect: {error}")))?;
+        let (attributes, settings) = side_policy(root, &selected.path)?;
+        if super::commit_basis(root)? != review.basis
+            || working_content(root, &selected.path)? != review.selected
+            || attributes != review.attributes
+            || settings != review.settings
+        {
+            return Err(io::Error::other(
+                "State changed after side checkout; file may be replaced, inspect before staging",
+            ));
+        }
+        run_write(
+            root,
+            &[
+                OsStr::new("add"),
+                OsStr::new("--"),
+                selected.path.as_os_str(),
+            ],
+            None,
+        )
+    };
+    result.map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "Side resolution failed; file/index may have changed, refresh and inspect: {error}"
+            ),
+        )
+    })?;
+    let staged = super::read_output::complete(
+        root,
+        &[
+            OsStr::new("ls-files"),
+            OsStr::new("--stage"),
+            OsStr::new("-z"),
+            OsStr::new("--"),
+            selected.path.as_os_str(),
+        ],
+        64 * 1024,
+    )?;
+    let expected = match &review.preview.oid {
+        None => Vec::new(),
+        Some(oid) => {
+            let mut expected = format!(
+                "{} {oid} 0\t",
+                if review.preview.executable {
+                    "100755"
+                } else {
+                    "100644"
+                }
+            )
+            .into_bytes();
+            expected.extend_from_slice(selected.path.as_os_str().as_encoded_bytes());
+            expected.push(0);
+            expected
+        }
+    };
+    if staged != expected || working_content(root, &selected.path)? != review.selected {
+        return Err(io::Error::other(
+            "Side resolution postcondition failed; inspect file/index before continuing",
+        ));
+    }
+    Ok(format!(
+        "Applied reviewed {:?} side to {} and staged the result",
+        review.preview.side,
+        selected.path.display()
+    ))
 }

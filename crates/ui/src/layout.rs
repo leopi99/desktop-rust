@@ -47,7 +47,25 @@ impl Desktop {
                             ConflictSide::Theirs,
                         ));
                     }
-                    files = files.push(review).push(ours).push(theirs);
+                    let mut choose_ours = button("Choose ours…");
+                    let mut choose_theirs = button("Choose theirs…");
+                    if !self.loading {
+                        choose_ours = choose_ours.on_press(Message::RequestConflictSideResolution(
+                            change.clone(),
+                            ConflictSide::Ours,
+                        ));
+                        choose_theirs =
+                            choose_theirs.on_press(Message::RequestConflictSideResolution(
+                                change.clone(),
+                                ConflictSide::Theirs,
+                            ));
+                    }
+                    files = files
+                        .push(review)
+                        .push(ours)
+                        .push(theirs)
+                        .push(choose_ours)
+                        .push(choose_theirs);
                 } else {
                     files = files.push(row![stage, unstage].spacing(6));
                 }
@@ -61,6 +79,28 @@ impl Desktop {
             files = files
                 .push(text(format!("Reviewed: {}", review.change.path.display())))
                 .push(resolve);
+        }
+        let mut side_confirmation = column![].spacing(6);
+        if let Some(review) = &self.side_resolution_review {
+            let action = if review.preview.oid.is_none() {
+                "Delete working file and stage"
+            } else {
+                "Replace working file and stage"
+            };
+            let mut apply = button("Apply choice").style(button::danger);
+            let mut cancel = button("Cancel choice");
+            if !self.loading {
+                apply = apply.on_press(Message::ApplyConflictSideResolution);
+                cancel = cancel.on_press(Message::CancelConflictSideResolution);
+            }
+            files = files.push(text(format!(
+                "Reviewed {:?}: {}",
+                review.preview.side,
+                review.preview.change.path.display()
+            )));
+            side_confirmation = side_confirmation
+                .push(text(action))
+                .push(row![apply, cancel].spacing(8));
         }
         let mut open = button(if self.loading {
             "Loading…"
@@ -373,12 +413,17 @@ impl Desktop {
             .height(Length::Fill)
             .into()
         } else {
-            row![
-                scrollable(files).width(Length::FillPortion(1)),
-                scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
-                    .width(Length::FillPortion(3))
+            column![
+                row![
+                    scrollable(files).width(Length::FillPortion(1)),
+                    scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
+                        .width(Length::FillPortion(3))
+                ]
+                .spacing(16)
+                .height(Length::Fill),
+                side_confirmation
             ]
-            .spacing(16)
+            .spacing(8)
             .height(Length::Fill)
             .into()
         };

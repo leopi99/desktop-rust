@@ -6,9 +6,9 @@ mod update;
 
 use desktop_core::{
     CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, ConflictSide,
-    ConflictSideContent, ConflictSidePreview, FileChange, FileDiff, GitRuntime, LocalBranch,
-    MergeKind, MergePreview, RebaseKind, RebasePreview, Remote, RemoteAction, RemoteUrlKind,
-    RepositorySnapshot, StashEntry,
+    ConflictSideContent, ConflictSidePreview, ConflictSideResolutionReview, ConflictWorkingContent,
+    FileChange, FileDiff, GitRuntime, LocalBranch, MergeKind, MergePreview, RebaseKind,
+    RebasePreview, Remote, RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
 use iced::futures::SinkExt;
@@ -65,6 +65,7 @@ struct Desktop {
     remote_after_refresh: Option<std::ffi::OsString>,
     show_remote_settings: bool,
     conflict_review: Option<ConflictReview>,
+    side_resolution_review: Option<std::sync::Arc<ConflictSideResolutionReview>>,
     selected_stash: Option<StashEntry>,
     stash_message: String,
     show_stashes: bool,
@@ -98,6 +99,10 @@ enum Message {
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
     ReviewConflictSide(FileChange, ConflictSide),
+    RequestConflictSideResolution(FileChange, ConflictSide),
+    ConflictSideResolutionReviewed(Result<ConflictSideResolutionReview, String>),
+    ApplyConflictSideResolution,
+    CancelConflictSideResolution,
     ConflictSidePreviewed(Result<ConflictSidePreview, String>),
     ConflictReviewed(Result<ConflictReview, String>),
     ResolveConflict,
@@ -1754,6 +1759,93 @@ mod side_preview_tests {
                 },
             }),
             ..Desktop::default()
+        }
+    }
+
+    fn choice(app: &Desktop) -> ConflictSideResolutionReview {
+        let snapshot = app.snapshot.as_ref().unwrap();
+        ConflictSideResolutionReview {
+            preview: ConflictSidePreview {
+                repository: snapshot.repository.clone(),
+                change: FileChange {
+                    path: "file".into(),
+                    original_path: None,
+                    index: 'U',
+                    worktree: 'U',
+                },
+                side: ConflictSide::Theirs,
+                oid: Some("a".repeat(40)),
+                executable: false,
+                content: ConflictSideContent::Binary { size: 3 },
+            },
+            basis: snapshot.commit_basis.clone(),
+            working: ConflictWorkingContent::File {
+                bytes: b"a\0b".to_vec(),
+                executable: false,
+            },
+            selected: ConflictWorkingContent::File {
+                bytes: b"c\0d".to_vec(),
+                executable: false,
+            },
+            attributes: Vec::new(),
+            settings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn confirmed_choice_is_consumed_and_partial_failure_refreshes_without_losing_drafts() {
+        let mut app = app();
+        let review = choice(&app);
+        let _ = app.update(Message::ApplyConflictSideResolution);
+        assert!(!app.loading);
+        let _ = app.update(Message::ConflictSideResolutionReviewed(Ok(review)));
+        assert!(app.side_resolution_review.is_some());
+        assert!(app.detail.contains("Current working version"));
+        assert!(app.detail.contains("Binary data"));
+        let _ = app.update(Message::ApplyConflictSideResolution);
+        assert!(app.loading);
+        assert!(app.side_resolution_review.is_none());
+        let detail = app.detail.clone();
+        let _ = app.update(Message::CancelConflictSideResolution);
+        let _ = app.update(Message::ApplyConflictSideResolution);
+        let _ = app.update(Message::PanelSelected(Panel::Branches));
+        assert!(app.loading);
+        assert_eq!(app.panel, Panel::Changes);
+        assert_eq!(app.detail, detail);
+        let _ = app.update(Message::Wrote(
+            Operation::ResolveConflict,
+            Err("staging failed; inspect working file".into()),
+        ));
+        assert!(app.loading); // Refresh must finish before another write is offered.
+        assert!(app.side_resolution_review.is_none());
+        assert!(app.notice.contains("staging failed"));
+        let _ = app.update(Message::Refreshed(Err("refresh failed".into())));
+        assert!(!app.loading);
+        assert_eq!(app.summary, "keep summary");
+        assert_eq!(app.description, "keep body");
+    }
+
+    #[test]
+    fn cancel_navigation_selection_refresh_and_preview_revoke_side_choices() {
+        for action in 0..6 {
+            let mut app = app();
+            let review = choice(&app);
+            let change = review.preview.change.clone();
+            let preview = review.preview.clone();
+            let _ = app.update(Message::ConflictSideResolutionReviewed(Ok(review)));
+            let message = match action {
+                0 => Message::CancelConflictSideResolution,
+                1 => Message::PanelSelected(Panel::Branches),
+                2 => Message::Select(change),
+                3 => Message::Refreshed(Err("refresh failed".into())),
+                4 => Message::ConflictSidePreviewed(Ok(preview)),
+                _ => Message::PathChanged("/elsewhere".into()),
+            };
+            let _ = app.update(message);
+            assert!(app.side_resolution_review.is_none(), "action {action}");
+            // Changing repositories intentionally clears repository-specific drafts.
+            assert_eq!(app.summary, if action == 5 { "" } else { "keep summary" });
+            assert_eq!(app.description, if action == 5 { "" } else { "keep body" });
         }
     }
 
