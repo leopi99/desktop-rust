@@ -124,7 +124,8 @@ end-to-end UI deletion checks remain outstanding.
 
 ## Git pipe-reader lifecycle
 
-Transfers and bounded Unix reads share a reader-pair owner. Both pipe threads
+Transfers, the shared local-write runner and bounded Unix reads share a reader-pair
+owner. Both pipe threads
 start through fallible builders; failure to start either reader stops/reaps the
 managed child and waits for any started reader. At completion both workers are
 joined before a reader panic or I/O error is returned. Transfers retain their
@@ -134,6 +135,24 @@ Other whole-output Git adapters still require lifecycle/resource review, and
 Windows still needs native process-tree/inherited-pipe cleanup (PLAT-01).
 The remaining read-scan and local-write work is tracked as R-05 and R-06 in
 [the backlog](rust/backlog.md).
+
+The shared local-write runner starts both output readers before feeding a commit
+message to stdin, then closes stdin, waits for Git and joins both readers. Each
+stream retains only its last 64 KiB of raw bytes with a marker for discarded
+output; UTF-8 replacement may enlarge the displayed string. Successful calls keep
+their stdout-only diagnostic contract. Git failure status and both diagnostic
+tails take precedence over a secondary stdin failure; an incomplete input write
+still fails even if the child exits successfully. Real Git redirects hook stdout
+to stderr, so those messages appear in the failure diagnostics.
+
+No automatic timeout or cancellation is imposed on local-write hooks/signing.
+A stalled child or inherited pipe can still keep the operation busy; interruption
+and recovery policy remains pending. I/O/setup errors do not promise rollback of
+an already started Git command. Existing freshness checks and repository refresh
+remain necessary. Bespoke merge/rebase runners still have whole-output capture
+and are outside this migrated path. Linux tests use real noisy hooks, large
+messages and staged/unstaged files, and verify retry after a rejected hook. The
+Linux pipe-deadlock regression uses coreutils `timeout` to bound the test itself.
 
 ## Git runtime diagnostics
 
