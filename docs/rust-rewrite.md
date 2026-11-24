@@ -50,9 +50,9 @@ automatic stash or remote branch guessing is used. Before the first commit,
 create-and-switch sets the initial branch name; no branch ref exists until commit.
 Commit drafts survive branch changes; a failed creation also retains the branch name.
 
-## Rename the current branch
+## Rename a local branch
 
-In Branches, enter a new name in New name for the current branch and choose
+In Branches, enter a new name in New local branch name and choose
 Rename current branch. This renames only the observed, committed local branch;
 Git moves its reflog and local branch configuration. The commit ID, staged and
 unstaged changes and untracked files are preserved. Tracking keeps its existing
@@ -67,6 +67,15 @@ the current linked worktree is supported. Git uses its mandatory ref locks, with
 no forced overwrite. Preflight checks do not fence concurrent external clients;
 if Git fails after changing a ref, refresh shows the actual resulting state.
 
+To rename another local branch, select it in the branch list, enter its new name
+and choose Rename selected branch. This does not switch branches: current HEAD,
+staged/unstaged contents and untracked files remain intact. The observed target
+name, full object ID and current flag must still match. A branch used by any other
+worktree is refused, even when Git could update that worktree's branch name.
+The same destination/configuration and active-operation guards apply. The UI
+requires the Branches panel, an observed non-current branch and no write in flight;
+a failed action refreshes state and retains the rename draft.
+
 The rename field is separate from branch creation. Failures retain it, successful
 renames clear only that field, and changing repositories clears it. Commit and
 branch-creation drafts survive the rename. Integration tests cover tracking,
@@ -74,8 +83,8 @@ reflog, index/file preservation, stale observations, destination collisions,
 sequencer state, linked worktrees and native non-UTF-8 source names on Unix.
 
 This is a prototype under the existing `branches` feature in the upstream ledger.
-Renaming a different selected branch and case-only renames requiring a forced
-retry remain planned. Safe deletion of merged local branches is described below. The reference implementation in
+Current and selected-branch rename are implemented locally. Case-only renames
+requiring a forced retry remain unsupported. Safe deletion of merged local branches is described below. The reference implementation in
 `app/src/lib/git/branch.ts` supports a wider scope; this increment does not claim
 complete branch parity or advance release checkpoints. The input accepts a UTF-8
 new name, while an existing source name retains its native filesystem encoding.
@@ -281,7 +290,7 @@ history navigation QA remains outstanding.
 
 ## UI transition modules
 
-`crates/ui/src/update/mod.rs` exhaustively routes the application's 80 message
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 81 message
 variants to typed events in ten domain handlers: application/navigation,
 repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
 stashes and completion/refresh. Guard failures explicitly match the relevant

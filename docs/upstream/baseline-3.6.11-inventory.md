@@ -170,6 +170,36 @@ these paths preserve the unmerged index and do not stage a hook-edited file.
 No automatic rollback, transaction against external clients or parity checkpoint
 advance is claimed.
 
+## Local branch rename subset
+
+Focused source inspected at the pinned commit:
+[renameBranch helper](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/branch.ts),
+[dialog submission/rule checks](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/rename-branch/rename-branch-dialog.tsx)
+and [reflog rename test](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/test/unit/git/reflog-test.ts).
+The helper receives an explicit branch and uses Git branch move. Its error path
+can retry a case-only collision with a forced move after checking branch names.
+The dialog forwards its selected branch and new name and performs separate
+account/repository rule checks. The inspected reflog test renames the current
+branch and checks that recent branches use the updated name. This does not audit
+all dispatcher callers, rulesets, branch tests or platform behavior.
+
+Rust [dcf0589562](https://github.com/leopi99/desktop-rust/commit/dcf0589562e9d68b3fce55a40e0e908f5093894c) extends the existing current-branch command with explicit
+non-current local branch rename. It checks the observed target name/full OID/current
+flag, source index/HEAD/branch, idle operation state, destination refs/config and
+worktree use, then invokes literal `branch --move -- source destination`. No
+forced retry is attempted. Git owns ref/config/reflog changes; no checkout or
+remote operation is requested. Current and selected rename share destination and
+worktree checks. Current HEAD, index/files and the target's original remote tracking
+destination remain intact in the exercised regressions; local config and reflog
+follow the new name. Six additional Git tests cover preservation and refusal cases,
+including native source names and a branch open in another worktree. UI guards and
+shared failure/refresh behavior are covered separately.
+
+Concurrent external ref/config changes can still race preflight. Account/ruleset
+validation, forced case-only rename policy, other platforms and full interactive
+QA remain outside this scoped port. G-03 still includes further history operations;
+no feature/release parity checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -180,7 +210,7 @@ Feature identifiers match `upstream/features.json`.
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
 | repository-read, diff, stage-commit, commit-history | Pending | Status/diff/index contracts, hunk selection, parsing, limits and original tests. |
-| branches, stash | Pending | Supported operations, worktrees, tracking, recovery, original tests. |
+| branches, stash | Partial rename helper/dialog/reflog-test inspection; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |
 | local-merge, linear-rebase, merge-rebase-conflicts | Pending | Preview/execute/recovery contracts, sequencer state, UI integration and tests. |
 | lfs-submodules, enterprise-pull-requests, advanced-integrations | Pending | Feature surface, dependencies, platform and authentication requirements. |
