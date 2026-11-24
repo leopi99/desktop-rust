@@ -211,3 +211,38 @@ fn inherited_git_environment_cannot_redirect_initialization() {
     assert!(!area.0.join("foreign-index").exists());
     assert!(area.0.join("project/.git/HEAD").is_file());
 }
+
+#[test]
+fn damaged_bare_metadata_and_its_children_are_never_initialized() {
+    let area = Area::new();
+    git(
+        &area.0,
+        &["init", "--bare", "--initial-branch=main", "bare"],
+    );
+    let bare = area.0.join("bare");
+    std::fs::write(bare.join("HEAD"), b"damaged HEAD\n").unwrap();
+    let head = std::fs::read(bare.join("HEAD")).unwrap();
+    assert!(desktop_git::init_repository(&bare, "other").is_err());
+    assert!(desktop_git::init_repository(&bare.join("objects/new-project"), "main").is_err());
+    assert!(!bare.join(".git").exists());
+    assert!(!bare.join("objects/new-project").exists());
+    assert_eq!(std::fs::read(bare.join("HEAD")).unwrap(), head);
+}
+
+#[test]
+fn ordinary_head_named_project_file_is_preserved_during_initialization() {
+    let area = Area::new();
+    let project = area.0.join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(project.join("HEAD"), b"ordinary project file\n").unwrap();
+    desktop_git::init_repository(&project, "main").unwrap();
+    assert_eq!(
+        std::fs::read(project.join("HEAD")).unwrap(),
+        b"ordinary project file\n"
+    );
+    assert!(desktop_git::snapshot(&project)
+        .unwrap()
+        .commit_basis
+        .head
+        .is_none());
+}

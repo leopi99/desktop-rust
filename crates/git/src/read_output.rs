@@ -104,7 +104,7 @@ pub(super) fn preview<S: AsRef<OsStr>>(
     }
     #[cfg(not(unix))]
     {
-        let bytes = crate::read_bytes(path, args)?;
+        let bytes = successful(command(path, args).output()?)?;
         Ok(display(
             &bytes[..bytes.len().min(limit)],
             bytes.len() > limit,

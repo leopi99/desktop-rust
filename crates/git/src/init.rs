@@ -1,26 +1,36 @@
 //! Initialize a local project without reusing existing Git metadata.
-use super::{branches, read_bytes, run_write, WRITE_LOCK};
+use super::{branches, run_write, WRITE_LOCK};
 use std::{
     io,
     path::{Path, PathBuf},
 };
 
-fn check_location(path: &Path) -> io::Result<()> {
-    // A malformed gitfile, a linked-worktree marker or a broken symlink must
-    // also prevent initialization, even if `rev-parse` cannot open it.
-    for ancestor in path.ancestors() {
-        match std::fs::symlink_metadata(ancestor.join(".git")) {
-            Ok(_) => {
-                return Err(io::Error::other(
-                    "Destination is already inside a Git repository",
-                ))
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+fn entry_exists(path: &Path) -> io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
     }
-    if read_bytes(path, &["rev-parse", "--absolute-git-dir"]).is_ok() {
-        return Err(io::Error::other("Destination is already a Git repository"));
+}
+
+fn check_location(path: &Path) -> io::Result<()> {
+    for ancestor in path.ancestors() {
+        if entry_exists(&ancestor.join(".git"))? {
+            return Err(io::Error::other(
+                "Destination is already inside Git metadata",
+            ));
+        }
+        // Conservatively protect bare/separate Git directories even with broken
+        // HEAD/refs or symlinked components. Never infer absence from Git failure.
+        if entry_exists(&ancestor.join("HEAD"))? && entry_exists(&ancestor.join("objects"))? {
+            for marker in ["refs", "reftable", "packed-refs"] {
+                if entry_exists(&ancestor.join(marker))? {
+                    return Err(io::Error::other(
+                        "Destination is inside a Git metadata layout",
+                    ));
+                }
+            }
+        }
     }
     Ok(())
 }

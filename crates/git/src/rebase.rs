@@ -1,9 +1,17 @@
 //! Explicit non-interactive rebases of linear local history.
-use super::{commit_basis, file_path, git_command, merge, read_bytes, snapshot, WRITE_LOCK};
+use super::{commit_basis, file_path, git_command, merge, snapshot, WRITE_LOCK};
 use desktop_core::{
     CommitBasis, LocalBranch, RebaseCommit, RebaseKind, RebasePreview, RebaseState,
 };
 use std::{collections::HashSet, io, path::Path, process::Stdio};
+
+const COMMIT_LIMIT: usize = 1000;
+const PATH_BYTES_LIMIT: usize = 8 * 1024 * 1024;
+const PATH_COUNT_LIMIT: usize = 10_000;
+
+fn read_metadata<S: AsRef<std::ffi::OsStr>>(root: &Path, args: &[S]) -> io::Result<Vec<u8>> {
+    super::read_output::complete(root, args, 4 * 1024 * 1024)
+}
 
 fn hash(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.bytes().all(|b| b.is_ascii_hexdigit())
@@ -85,6 +93,10 @@ pub(super) fn state(root: &Path) -> io::Result<Option<RebaseState>> {
                 {
                     supported = false;
                 } else {
+                    if commits.len() == COMMIT_LIMIT {
+                        supported = false;
+                        break;
+                    }
                     commits.push(String::from_utf8_lossy(oid).into_owned());
                 }
             }
@@ -107,19 +119,6 @@ pub(super) fn state(root: &Path) -> io::Result<Option<RebaseState>> {
         }));
     }
     Ok(None)
-}
-
-fn ancestor(root: &Path, first: &str, second: &str) -> io::Result<bool> {
-    let output = git_command(root)
-        .args(["merge-base", "--is-ancestor", first, second])
-        .output()?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(io::Error::other(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        )),
-    }
 }
 
 fn build_preview(
@@ -165,34 +164,36 @@ fn build_preview(
         kind: RebaseKind::AlreadyUpToDate,
         commits: Vec::new(),
     };
-    if ancestor(path, &target.oid, head)? {
+    if merge::ancestor(path, &target.oid, head)? {
         return Ok(preview);
     }
-    if ancestor(path, head, &target.oid)? {
+    if merge::ancestor(path, head, &target.oid)? {
         preview.kind = RebaseKind::FastForward;
         return Ok(preview);
     }
-    let common = git_command(path)
-        .args(["merge-base", head, &target.oid])
-        .output()?;
-    if common.status.code() == Some(1) {
-        return Err(io::Error::other("Branches have unrelated histories"));
-    }
-    if !common.status.success() {
-        return Err(io::Error::other(
-            String::from_utf8_lossy(&common.stderr).into_owned(),
-        ));
-    }
+    merge::require_common_ancestor(path, head, &target.oid)?;
     let range = format!("{}..{head}", target.oid);
-    if !read_bytes(path, &["rev-list", "--merges", &range, "--"])?.is_empty() {
+    if !read_metadata(
+        path,
+        &["rev-list", "--merges", "--max-count=1", &range, "--"],
+    )?
+    .is_empty()
+    {
         return Err(io::Error::other(
             "Source contains merge commits; only linear rebase is supported",
         ));
     }
-    let bytes = read_bytes(
+    let bytes = read_metadata(
         path,
         &[
+            "-c",
+            "i18n.logOutputEncoding=UTF-8",
             "log",
+            "--no-show-signature",
+            "--no-notes",
+            "--no-decorate",
+            "--no-color",
+            &format!("--max-count={}", COMMIT_LIMIT + 1),
             "--reverse",
             "--topo-order",
             "--format=%H%x00%s%x00",
@@ -204,6 +205,12 @@ fn build_preview(
         let fields: Vec<_> = line.split(|b| *b == 0).collect();
         if fields.len() != 3 || !hash(&String::from_utf8_lossy(fields[0])) {
             return Err(io::Error::other("Invalid rebase commit list"));
+        }
+        if preview.commits.len() == COMMIT_LIMIT {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Rebase exceeds the 1,000-commit review limit",
+            ));
         }
         preview.commits.push(RebaseCommit {
             oid: String::from_utf8_lossy(fields[0]).into_owned(),
@@ -230,16 +237,48 @@ pub fn preview_rebase(
     build_preview(path, target, expected)
 }
 
+fn append_paths(
+    root: &Path,
+    args: &[&str],
+    paths: &mut Vec<u8>,
+    count: &mut usize,
+) -> io::Result<()> {
+    let remaining = PATH_BYTES_LIMIT.saturating_sub(paths.len());
+    let bytes = super::read_output::complete(root, args, remaining.min(4 * 1024 * 1024))?;
+    let additional = bytes
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .count();
+    if additional > PATH_COUNT_LIMIT.saturating_sub(*count) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Rebase exceeds the 10,000-path review limit",
+        ));
+    }
+    *count += additional;
+    paths.extend(bytes);
+    Ok(())
+}
+
 fn check_collisions(root: &Path, trees: &[String], commits: &[String]) -> io::Result<()> {
+    if trees.len() > 2 || commits.len() > COMMIT_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Rebase exceeds the supported review size",
+        ));
+    }
     let mut paths = Vec::new();
+    let mut count = 0;
     for tree in trees {
-        paths.extend(read_bytes(
+        append_paths(
             root,
             &["ls-tree", "-r", "--name-only", "-z", tree, "--"],
-        )?);
+            &mut paths,
+            &mut count,
+        )?;
     }
     for commit in commits {
-        paths.extend(read_bytes(
+        append_paths(
             root,
             &[
                 "diff-tree",
@@ -252,9 +291,11 @@ fn check_collisions(root: &Path, trees: &[String], commits: &[String]) -> io::Re
                 commit,
                 "--",
             ],
-        )?);
+            &mut paths,
+            &mut count,
+        )?;
     }
-    let index = read_bytes(root, &["ls-files", "-z"])?;
+    let index = super::read_output::complete(root, &["ls-files", "-z"], 16 * 1024 * 1024)?;
     let tracked: HashSet<&[u8]> = index.split(|b| *b == 0).collect();
     let paths: HashSet<&[u8]> = paths.split(|b| *b == 0).filter(|p| !p.is_empty()).collect();
     for raw in paths {
@@ -373,13 +414,14 @@ fn validate_active(root: &Path, expected: &CommitBasis) -> io::Result<RebaseStat
     if !active.supported {
         return Err(io::Error::other("Use Git to continue/abort this unsupported rebase (apply backend, custom todo or autostash)"));
     }
-    let branch_tip = read_bytes(
+    let branch_tip = super::read_output::complete(
         root,
         &[
             std::ffi::OsStr::new("rev-parse"),
             std::ffi::OsStr::new("--verify"),
             active.branch.as_os_str(),
         ],
+        64 * 1024,
     )?;
     if text(&branch_tip) != active.original_head {
         return Err(io::Error::other(

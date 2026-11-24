@@ -62,19 +62,6 @@ fn git_command(path: &Path) -> Command {
     command
 }
 
-fn read_bytes<S: AsRef<OsStr>>(path: &Path, args: &[S]) -> io::Result<Vec<u8>> {
-    let output = git_command(path)
-        .arg("--no-optional-locks")
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Err(io::Error::other(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
-    }
-    Ok(output.stdout)
-}
-
 fn file_path(bytes: &[u8]) -> io::Result<PathBuf> {
     #[cfg(unix)]
     {

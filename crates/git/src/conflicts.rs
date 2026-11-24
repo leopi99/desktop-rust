@@ -1,5 +1,5 @@
 //! Review and stage externally edited text conflicts without replacing file contents.
-use super::{read_bytes, run_write, snapshot, WRITE_LOCK};
+use super::{run_write, snapshot, WRITE_LOCK};
 use desktop_core::{ConflictContent, ConflictReview, FileChange};
 use std::{
     ffi::OsStr,
@@ -70,7 +70,7 @@ fn content(root: &Path, relative: &Path) -> io::Result<ConflictContent> {
 }
 
 fn marker_size(root: &Path, path: &Path) -> io::Result<usize> {
-    let output = read_bytes(
+    let output = super::read_output::complete(
         root,
         &[
             OsStr::new("check-attr"),
@@ -79,6 +79,7 @@ fn marker_size(root: &Path, path: &Path) -> io::Result<usize> {
             OsStr::new("--"),
             path.as_os_str(),
         ],
+        64 * 1024,
     )?;
     let fields: Vec<_> = output.split(|b| *b == 0).collect();
     if fields.len() != 4 || fields[1] != b"conflict-marker-size" {

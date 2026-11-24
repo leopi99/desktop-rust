@@ -63,16 +63,19 @@ pub(super) fn ensure_idle(root: &Path) -> io::Result<()> {
 }
 
 pub(super) fn ancestor(root: &Path, first: &str, second: &str) -> io::Result<bool> {
-    let output = git_command(root)
-        .args(["merge-base", "--is-ancestor", first, second])
-        .output()?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(io::Error::other(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        )),
-    }
+    Ok(
+        super::read_output::optional(root, &["merge-base", "--is-ancestor", first, second], 0)?
+            .is_some(),
+    )
+}
+
+pub(super) fn require_common_ancestor(root: &Path, first: &str, second: &str) -> io::Result<()> {
+    let bytes =
+        super::read_output::optional(root, &["merge-base", "--", first, second], 64 * 1024)?
+            .ok_or_else(|| io::Error::other("Branches have unrelated histories"))?;
+    let oid = std::str::from_utf8(&bytes)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    super::history::validate_oid(oid.strip_suffix('\n').unwrap_or(oid))
 }
 
 fn build_preview(
@@ -126,17 +129,7 @@ fn build_preview(
         preview.kind = MergeKind::FastForward;
         return Ok(preview);
     }
-    let common = git_command(&preview.repository.path)
-        .args(["merge-base", "--", head, &target.oid])
-        .output()?;
-    if common.status.code() == Some(1) {
-        return Err(io::Error::other("Branches have unrelated histories"));
-    }
-    if !common.status.success() {
-        return Err(io::Error::other(
-            String::from_utf8_lossy(&common.stderr).into_owned(),
-        ));
-    }
+    require_common_ancestor(&preview.repository.path, head, &target.oid)?;
     let output = git_command(&preview.repository.path)
         .args([
             "merge-tree",

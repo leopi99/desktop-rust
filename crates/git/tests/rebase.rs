@@ -417,3 +417,219 @@ fn ignored_file_created_while_paused_blocks_continue_until_moved_aside() {
         b"new ignored work"
     );
 }
+
+#[test]
+fn replay_limit_rejects_incomplete_plans_and_accepts_the_exact_boundary() {
+    let f = Fixture::new();
+    let base = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD"])).unwrap();
+    let tree = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD^{tree}"])).unwrap();
+    let target = String::from_utf8(git(
+        &f.repo,
+        &[
+            "commit-tree",
+            tree.trim(),
+            "-p",
+            base.trim(),
+            "-m",
+            "target",
+        ],
+    ))
+    .unwrap();
+    git(
+        &f.repo,
+        &["update-ref", "refs/heads/upstream", target.trim()],
+    );
+    let mut tip = base.trim().to_owned();
+    let mut accepted_tip = String::new();
+    for index in 0..1001 {
+        tip = String::from_utf8(git(
+            &f.repo,
+            &[
+                "commit-tree",
+                tree.trim(),
+                "-p",
+                &tip,
+                "-m",
+                &format!("source {index}"),
+            ],
+        ))
+        .unwrap()
+        .trim()
+        .to_owned();
+        if index == 999 {
+            accepted_tip = tip.clone();
+        }
+    }
+    git(&f.repo, &["update-ref", "HEAD", &tip]);
+    let before = f.basis();
+    let refs = git(&f.repo, &["show-ref"]);
+    assert_eq!(
+        desktop_git::preview_rebase(&f.repo, &f.target(), &before)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(git(&f.repo, &["show-ref"]), refs);
+    assert!(!f.repo.join(".git/rebase-merge").exists());
+    git(&f.repo, &["update-ref", "HEAD", &accepted_tip]);
+    let preview = desktop_git::preview_rebase(&f.repo, &f.target(), &f.basis()).unwrap();
+    assert_eq!(preview.kind, RebaseKind::Replay);
+    assert_eq!(preview.commits.len(), 1000);
+    assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), b"base\n");
+}
+
+#[test]
+fn oversized_rebase_checkout_review_is_rejected_before_refs_or_files_change() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let f = Fixture::new();
+    let blob = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD:base"])).unwrap();
+    let mut input = format!("100644 blob {}\tbase\0", blob.trim()).into_bytes();
+    for index in 0..10_001 {
+        input.extend_from_slice(
+            format!("100644 blob {}\tvirtual-{index:05}\0", blob.trim()).as_bytes(),
+        );
+    }
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(&f.repo)
+        .args(["mktree", "-z"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(&input).unwrap();
+    let result = child.wait_with_output().unwrap();
+    assert!(result.status.success());
+    let tree = String::from_utf8(result.stdout).unwrap();
+    let commit = String::from_utf8(git(
+        &f.repo,
+        &[
+            "commit-tree",
+            tree.trim(),
+            "-p",
+            "HEAD",
+            "-m",
+            "large target",
+        ],
+    ))
+    .unwrap();
+    git(
+        &f.repo,
+        &["update-ref", "refs/heads/upstream", commit.trim()],
+    );
+    let before = f.basis();
+    let refs = git(&f.repo, &["show-ref"]);
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    let preview = desktop_git::preview_rebase(&f.repo, &f.target(), &before).unwrap();
+    assert_eq!(preview.kind, RebaseKind::FastForward);
+    assert_eq!(
+        desktop_git::execute_rebase(&preview).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(git(&f.repo, &["show-ref"]), refs);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert!(!f.repo.join("virtual-00000").exists());
+    assert!(!f.repo.join(".git/rebase-merge").exists());
+}
+
+#[test]
+fn combined_rebase_path_budget_rejects_many_individually_small_reads() {
+    use std::io::Write;
+    use std::process::Stdio;
+    fn tree(repo: &Path, bytes: &[u8]) -> String {
+        let mut child = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["mktree", "-z"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(bytes).unwrap();
+        let result = child.wait_with_output().unwrap();
+        assert!(result.status.success());
+        String::from_utf8(result.stdout).unwrap().trim().to_owned()
+    }
+    fn long_tree(repo: &Path, blob: &str, count: usize) -> String {
+        let mut bytes = Vec::new();
+        for index in 0..count {
+            bytes.extend_from_slice(format!("100644 blob {blob}\tfile-{index:05}\0").as_bytes());
+        }
+        let mut oid = tree(repo, &bytes);
+        for _ in 0..10 {
+            oid = tree(
+                repo,
+                format!("040000 tree {oid}\t{}\0", "p".repeat(100)).as_bytes(),
+            );
+        }
+        tree(
+            repo,
+            format!("100644 blob {blob}\tbase\0040000 tree {oid}\tvirtual\0").as_bytes(),
+        )
+    }
+    let f = Fixture::new();
+    let blob = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD:base"])).unwrap();
+    let base = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD"])).unwrap();
+    let base_tree = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD^{tree}"])).unwrap();
+    let small_tree = long_tree(&f.repo, blob.trim(), 1000);
+    let large_tree = long_tree(&f.repo, blob.trim(), 3000);
+    let target = String::from_utf8(git(
+        &f.repo,
+        &[
+            "commit-tree",
+            &large_tree,
+            "-p",
+            base.trim(),
+            "-m",
+            "large target",
+        ],
+    ))
+    .unwrap();
+    git(
+        &f.repo,
+        &["update-ref", "refs/heads/upstream", target.trim()],
+    );
+    let mut tip = base.trim().to_owned();
+    for index in 0..6 {
+        let selected_tree = if index % 2 == 0 {
+            &small_tree
+        } else {
+            base_tree.trim()
+        };
+        tip = String::from_utf8(git(
+            &f.repo,
+            &[
+                "commit-tree",
+                selected_tree,
+                "-p",
+                &tip,
+                "-m",
+                &format!("step {index}"),
+            ],
+        ))
+        .unwrap()
+        .trim()
+        .to_owned();
+    }
+    git(&f.repo, &["update-ref", "HEAD", &tip]);
+    let before = f.basis();
+    let refs = git(&f.repo, &["show-ref"]);
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    let preview = desktop_git::preview_rebase(&f.repo, &f.target(), &before).unwrap();
+    assert_eq!(preview.commits.len(), 6);
+    // Each stream fits 4 MiB and the 9,000 records fit the count budget;
+    // their combined raw paths exceed 8 MiB before any checkout is allowed.
+    assert_eq!(
+        desktop_git::execute_rebase(&preview).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(git(&f.repo, &["show-ref"]), refs);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert!(!f.repo.join("virtual").exists());
+    assert!(!f.repo.join(".git/rebase-merge").exists());
+}
