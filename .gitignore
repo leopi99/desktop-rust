@@ -19,3 +19,8 @@ junit*.xml
 *.swp
 tslint-rules/
 playwright-videos/
+
+# Rust fork build and discovery artifacts
+/target/
+/sync-output/
+__pycache__/

@@ -17,3 +17,7 @@ gemoji
 *.md
 app/static/logos/prod/**/*.json
 app/static/logos/dev/**/*.json
+
+# Rust build and generated upstream reports
+/target/
+/sync-output/

@@ -1,3 +1,14 @@
+# Desktop Rust
+
+Rust/Iced rewrite of GitHub Desktop, Linux first. This is an early preview with repository creation, local diff, staging, commits, branches, clone and explicit remote operations.
+
+See [rewrite and upstream maintenance](docs/rust-rewrite.md) for setup, milestones,
+and the stable-release synchronization procedure.
+
+The original README and Electron sources follow as reference.
+
+---
+
 # [GitHub Desktop](https://desktop.github.com)
 
 [GitHub Desktop](https://desktop.github.com/) is an open-source [Electron](https://www.electronjs.org/)-based

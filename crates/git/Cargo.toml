@@ -1,0 +1,11 @@
+[package]
+name = "desktop-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+desktop-core = { path = "../core" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
