@@ -29,6 +29,7 @@ permissions:
 
 jobs:
   draft-release:
+    if: github.repository == 'desktop/desktop'
     name: Draft Release
     runs-on: ubuntu-latest
 

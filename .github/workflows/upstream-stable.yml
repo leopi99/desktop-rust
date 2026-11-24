@@ -1,0 +1,31 @@
+name: Upstream stable discovery
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: upstream-stable
+  cancel-in-progress: false
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 script/upstream/registry.py
+      - run: python3 -m unittest discover -s script/upstream -v
+      - run: python3 script/upstream/sync.py --output sync-output
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Summarize discovery
+        run: cat sync-output/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-stable-review
+          path: sync-output/
+          if-no-files-found: error
+          retention-days: 90

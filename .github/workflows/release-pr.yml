@@ -4,6 +4,7 @@ on: create
 
 jobs:
   build:
+    if: github.repository == 'desktop/desktop'
     name: Create Release Pull Request
     runs-on: ubuntu-slim
     permissions:
