@@ -309,3 +309,32 @@ fn destination_prefix_does_not_match_another_branch_configuration() {
         b"saved-remote\n"
     );
 }
+
+#[test]
+fn oversized_local_config_refuses_rename_and_allows_retry_after_fixture_repair() {
+    let repo = Fixture::new();
+    repo.commit();
+    let observed = snapshot(&repo.path).unwrap();
+    let config_path = repo.path.join(".git/config");
+    let original = std::fs::read(&config_path).unwrap();
+    let mut config = original.clone();
+    config.extend_from_slice(
+        format!("\n[oversized]\nvalue = {}\n", "x".repeat(5 * 1024 * 1024)).as_bytes(),
+    );
+    std::fs::write(&config_path, &config).unwrap();
+    let before = repo.unchanged_state();
+    assert_eq!(
+        rename_current_branch(&repo.path, "renamed", &observed.commit_basis)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(repo.unchanged_state(), before);
+    assert_eq!(std::fs::read(&config_path).unwrap(), config);
+    std::fs::write(&config_path, original).unwrap();
+    rename_current_branch(&repo.path, "renamed", &observed.commit_basis).unwrap();
+    assert_eq!(
+        snapshot(&repo.path).unwrap().commit_basis.branch.unwrap(),
+        "refs/heads/renamed"
+    );
+}

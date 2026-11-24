@@ -1,5 +1,5 @@
 //! Local branch operations. Git owns overwrite and linked-worktree checks.
-use super::{commit_basis, file_path, read_bytes, run_write, WRITE_LOCK};
+use super::{commit_basis, file_path, run_write, WRITE_LOCK};
 use desktop_core::{CommitBasis, LocalBranch};
 use std::{ffi::OsStr, io, path::Path};
 
@@ -166,27 +166,34 @@ pub fn rename_current_branch(
         ));
     }
     // An orphan configuration section can still contain valuable tracking settings.
-    if read_bytes(path, &["config", "--local", "--null", "--list"])?
-        .split(|byte| *byte == 0)
-        .any(|entry| {
-            let key = entry
-                .split(|byte| *byte == b'\n')
-                .next()
-                .unwrap_or_default();
-            key.strip_prefix(b"branch.")
-                .and_then(|key| key.rsplitn(2, |byte| *byte == b'.').nth(1))
-                == Some(name.as_bytes())
-        })
-    {
+    if super::read_output::complete(
+        path,
+        &["config", "--local", "--null", "--list"],
+        4 * 1024 * 1024,
+    )?
+    .split(|byte| *byte == 0)
+    .any(|entry| {
+        let key = entry
+            .split(|byte| *byte == b'\n')
+            .next()
+            .unwrap_or_default();
+        key.strip_prefix(b"branch.")
+            .and_then(|key| key.rsplitn(2, |byte| *byte == b'.').nth(1))
+            == Some(name.as_bytes())
+    }) {
         return Err(io::Error::other(
             "The destination already has branch configuration; choose another name",
         ));
     }
     let full_ref = branch.as_encoded_bytes();
-    if read_bytes(path, &["worktree", "list", "--porcelain", "-z"])?
-        .split(|byte| *byte == 0)
-        .filter(|entry| entry.strip_prefix(b"branch ") == Some(full_ref))
-        .count()
+    if super::read_output::complete(
+        path,
+        &["worktree", "list", "--porcelain", "-z"],
+        4 * 1024 * 1024,
+    )?
+    .split(|byte| *byte == 0)
+    .filter(|entry| entry.strip_prefix(b"branch ") == Some(full_ref))
+    .count()
         > 1
     {
         return Err(io::Error::other(
@@ -279,6 +286,10 @@ pub(super) fn validate_name(path: &Path, name: &str) -> io::Result<()> {
             "Invalid local branch name",
         ));
     }
-    read_bytes(path, &["check-ref-format", &format!("refs/heads/{name}")])?;
+    super::read_output::complete(
+        path,
+        &["check-ref-format", &format!("refs/heads/{name}")],
+        64 * 1024,
+    )?;
     Ok(())
 }

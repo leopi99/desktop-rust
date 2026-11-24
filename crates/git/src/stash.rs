@@ -1,10 +1,17 @@
 //! Explicit stash save/apply. Applying never drops the saved entry.
-use super::{changes, commit_basis, file_path, read_bytes, run_write, WRITE_LOCK};
+use super::{changes, commit_basis, file_path, run_write, WRITE_LOCK};
 use desktop_core::{CommitBasis, StashEntry};
-use std::{ffi::OsStr, io, path::Path};
+use std::{collections::HashSet, ffi::OsStr, io, path::Path};
+
+const LIST_LIMIT: usize = 4 * 1024 * 1024;
+const PATH_COUNT_LIMIT: usize = 10_000;
+
+fn read_metadata<S: AsRef<OsStr>>(path: &Path, args: &[S]) -> io::Result<Vec<u8>> {
+    super::read_output::complete(path, args, LIST_LIMIT)
+}
 
 pub(super) fn list(path: &Path) -> io::Result<Vec<StashEntry>> {
-    let bytes = read_bytes(path, &["stash", "list", "--format=%H%x00%gs%x00"])?;
+    let bytes = read_metadata(path, &["stash", "list", "--format=%H%x00%gs%x00"])?;
     bytes
         .split(|b| *b == b'\n')
         .filter(|line| !line.is_empty())
@@ -86,7 +93,7 @@ pub fn save_stash(path: &Path, message: &str, expected: &CommitBasis) -> io::Res
 }
 
 fn check_collisions(path: &Path, stash: &StashEntry) -> io::Result<()> {
-    let mut paths = read_bytes(
+    let mut paths = read_metadata(
         path,
         &[
             "diff",
@@ -101,7 +108,7 @@ fn check_collisions(path: &Path, stash: &StashEntry) -> io::Result<()> {
         ],
     )?;
     // Stashes made outside the app may also contain untracked/ignored files.
-    if read_bytes(
+    if let Some(parent) = super::read_output::optional(
         path,
         &[
             "rev-parse",
@@ -109,22 +116,36 @@ fn check_collisions(path: &Path, stash: &StashEntry) -> io::Result<()> {
             "--quiet",
             &format!("{}^3", stash.oid),
         ],
-    )
-    .is_ok()
-    {
-        paths.extend(read_bytes(
+        64 * 1024,
+    )? {
+        let parent = std::str::from_utf8(&parent)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let parent = parent.strip_suffix('\n').unwrap_or(parent);
+        super::history::validate_oid(parent)?;
+        paths.extend(read_metadata(
             path,
-            &[
-                "ls-tree",
-                "-r",
-                "--name-only",
-                "-z",
-                &format!("{}^3", stash.oid),
-                "--",
-            ],
+            &["ls-tree", "-r", "--name-only", "-z", parent, "--"],
         )?);
     }
-    for bytes in paths.split(|b| *b == 0).filter(|name| !name.is_empty()) {
+    // Read the complete tracked set once instead of starting Git for each collision.
+    let tracked_bytes =
+        super::read_output::complete(path, &["ls-files", "--cached", "-z"], 16 * 1024 * 1024)?;
+    let tracked: HashSet<_> = tracked_bytes
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+        .map(file_path)
+        .collect::<io::Result<_>>()?;
+    for (index, bytes) in paths
+        .split(|b| *b == 0)
+        .filter(|name| !name.is_empty())
+        .enumerate()
+    {
+        if index == PATH_COUNT_LIMIT {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Stash exceeds the 10,000-path collision-review limit",
+            ));
+        }
         let relative = file_path(bytes)?;
         let mut parent = relative.parent();
         while let Some(component) = parent.filter(|p| !p.as_os_str().is_empty()) {
@@ -143,17 +164,7 @@ fn check_collisions(path: &Path, stash: &StashEntry) -> io::Result<()> {
         }
         match std::fs::symlink_metadata(path.join(&relative)) {
             Ok(_) => {
-                if read_bytes(
-                    path,
-                    &[
-                        OsStr::new("ls-files"),
-                        OsStr::new("--error-unmatch"),
-                        OsStr::new("--"),
-                        relative.as_os_str(),
-                    ],
-                )
-                .is_err()
-                {
+                if !tracked.contains(&relative) {
                     return Err(io::Error::other(format!(
                         "Untracked or ignored path would be overwritten: {}",
                         relative.display()

@@ -1,13 +1,19 @@
 //! Explicit remote operations using existing Git transport credentials.
-use super::{
-    commit_basis, file_path, read_bytes, run_write, transfer, TransferControl, WRITE_LOCK,
-};
+use super::{commit_basis, file_path, run_write, transfer, TransferControl, WRITE_LOCK};
 use desktop_core::{CommitBasis, Remote, RemoteAction, RemoteUrlKind};
 use std::{
     ffi::{OsStr, OsString},
     io,
     path::{Path, PathBuf},
 };
+
+const REMOTE_LIMIT: usize = 64;
+const URL_LIMIT: usize = 64;
+const METADATA_LIMIT: usize = 64 * 1024;
+
+fn read_metadata<S: AsRef<OsStr>>(path: &Path, args: &[S]) -> io::Result<Vec<u8>> {
+    super::read_output::complete(path, args, METADATA_LIMIT)
+}
 
 fn lines(bytes: &[u8]) -> io::Result<Vec<OsString>> {
     bytes
@@ -19,11 +25,17 @@ fn lines(bytes: &[u8]) -> io::Result<Vec<OsString>> {
 
 pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
     let basis = commit_basis(path)?;
-    let names = lines(&read_bytes(path, &["remote"])?)?;
+    let names = lines(&read_metadata(path, &["remote"])?)?;
+    if names.len() > REMOTE_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Repository exceeds the 64-remote limit",
+        ));
+    }
     let mut upstream_remote = None;
     let mut upstream_ref = None;
     if let Some(branch) = &basis.branch {
-        let raw = read_bytes(
+        let raw = read_metadata(
             path,
             &[
                 OsStr::new("for-each-ref"),
@@ -45,7 +57,7 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
     names
         .into_iter()
         .map(|name| {
-            let fetch_urls = lines(&read_bytes(
+            let fetch_urls = lines(&read_metadata(
                 path,
                 &[
                     OsStr::new("remote"),
@@ -55,7 +67,7 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
                     &name,
                 ],
             )?)?;
-            let push_urls = lines(&read_bytes(
+            let push_urls = lines(&read_metadata(
                 path,
                 &[
                     OsStr::new("remote"),
@@ -66,6 +78,12 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
                     &name,
                 ],
             )?)?;
+            if fetch_urls.len() > URL_LIMIT || push_urls.len() > URL_LIMIT {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Remote endpoint exceeds the 64-URL limit",
+                ));
+            }
             let target_branch = if basis.head.is_none() {
                 None
             } else if let Some(upstream_remote) = &upstream_remote {
@@ -279,6 +297,17 @@ fn validate_source(source: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn validate_endpoint(url: &str) -> io::Result<()> {
+    validate_source(url)?;
+    if url.len() >= METADATA_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Remote URL exceeds the metadata limit",
+        ));
+    }
+    Ok(())
+}
+
 /// Add a named remote without fetching or changing branch tracking.
 ///
 /// # Errors
@@ -294,16 +323,26 @@ pub fn add_remote(path: &Path, name: &str, url: &str) -> io::Result<String> {
             "Invalid remote name",
         ));
     }
-    read_bytes(
+    read_metadata(
         path,
         &["check-ref-format", &format!("refs/remotes/{name}/probe")],
     )?;
-    validate_source(url)?;
-    if list(path)?
-        .iter()
-        .any(|remote| remote.name == OsStr::new(name))
-    {
+    validate_endpoint(url)?;
+    let remotes = list(path)?;
+    if remotes.iter().any(|remote| remote.name == OsStr::new(name)) {
         return Err(io::Error::other("Remote already exists"));
+    }
+    let names_size: usize = remotes
+        .iter()
+        .map(|remote| remote.name.as_encoded_bytes().len() + 1)
+        .sum();
+    if remotes.len() == REMOTE_LIMIT
+        || names_size.saturating_add(name.len()).saturating_add(1) > METADATA_LIMIT
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Adding this remote would exceed the remote metadata limits",
+        ));
     }
     run_write(path, &["remote", "add", "--", name, url], None)?;
     Ok(format!("Added remote {name}"))
@@ -333,7 +372,7 @@ pub fn set_remote_url(
     let _guard = WRITE_LOCK
         .lock()
         .map_err(|_| io::Error::other("Write lock poisoned"))?;
-    validate_source(url)?;
+    validate_endpoint(url)?;
     validate_remote(path, selected)?;
     let urls = match kind {
         RemoteUrlKind::Fetch => &selected.fetch_urls,
