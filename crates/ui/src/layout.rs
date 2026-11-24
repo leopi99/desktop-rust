@@ -188,21 +188,24 @@ impl Desktop {
                 delete,
                 row![preview, merge].spacing(8),
                 row![preview_rebase, rebase].spacing(8),
-                row![
+                column![
                     text_input("New branch name", &self.new_branch)
                         .on_input(Message::BranchNameChanged),
                     create
                 ]
-                .spacing(8),
-                row![
+                .spacing(6)
+                .width(Length::Fill),
+                column![
                     text_input("New name for the current branch", &self.rename_branch)
                         .on_input(Message::RenameBranchNameChanged),
                     rename
                 ]
-                .spacing(8),
+                .spacing(6)
+                .width(Length::Fill),
                 text("Renaming is local. The remote branch keeps its existing name.").size(14),
             ]
-            .spacing(8);
+            .spacing(8)
+            .width(Length::Fill);
             if let Some(branch) = &self.delete_branch_pending {
                 let mut confirm = button("Delete reviewed local branch").style(button::danger);
                 if !self.loading {
@@ -473,7 +476,8 @@ impl Desktop {
                     branch_controls,
                     text(&self.detail).font(iced::Font::MONOSPACE)
                 ]
-                .spacing(20),
+                .spacing(20)
+                .width(Length::Fill),
             )
             .height(Length::Fill)
             .into(),
