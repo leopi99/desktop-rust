@@ -60,22 +60,28 @@ def main():
                     (repo / ".git/index").read_bytes(), (repo / ".git/config").read_bytes(), files)
 
         before = signature()
-        panels = ["changes", "history", "branches", "remotes", "stash", "repository", "branch-delete-review"]
+        panels = ["changes", "history", "branches", "remotes", "stash", "repository", "git", "branch-delete-review"]
         for panel in panels:
             subprocess.run(
                 [str(binary), "--repository", str(repo), "--panel", panel,
                  "--size", args.size, "--capture", str(output / f"{panel}.png")],
                 env=env, check=True, timeout=40,
             )
+        # With no repository open, exercise the missing-Git diagnostic in isolation.
+        subprocess.run(
+            [str(binary), "--panel", "git", "--size", args.size,
+             "--capture", str(output / "git-missing.png")],
+            env={**env, "PATH": str(output / "missing-tools")}, check=True, timeout=40,
+        )
         after = signature()
         if before != after:
             raise RuntimeError("UI capture changed fixture files, configuration, status, refs, or index")
     (output / "report.json").write_text(json.dumps({
-        "size": args.size, "panels": panels,
+        "size": args.size, "panels": panels, "diagnostic_cases": ["git-missing"],
         "fixture_unchanged": True,
         "note": "Rendered captures require human visual review; this is not an interaction or accessibility test.",
     }, indent=2) + "\n")
-    print(f"Captured {len(panels)} panels in {output}; fixture unchanged")
+    print(f"Captured {len(panels)} panels plus missing-Git diagnostics in {output}; fixture unchanged")
 
 
 if __name__ == "__main__":

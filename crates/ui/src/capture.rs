@@ -27,7 +27,7 @@ impl Start {
         let mut args = args.into_iter();
         while let Some(flag) = args.next() {
             if flag == "--help" {
-                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|branch-delete-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
+                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|branch-delete-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
                 return Ok(None);
             }
             if !["--repository", "--panel", "--size", "--capture"]
@@ -49,6 +49,7 @@ impl Start {
                         Some("remotes") => Panel::Remotes,
                         Some("stash") => Panel::Stashes,
                         Some("repository") => Panel::Repository,
+                        Some("git") => Panel::Git,
                         _ => return Err("Unknown panel".into()),
                     }
                 }

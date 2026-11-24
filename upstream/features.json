@@ -17,6 +17,9 @@
     { "id": "merge-rebase-conflicts", "status": "planned" },
     { "id": "lfs-submodules", "status": "planned" },
     { "id": "enterprise-pull-requests", "status": "planned" },
-    { "id": "advanced-integrations", "status": "planned" }
+    { "id": "advanced-integrations", "status": "planned" },
+    { "id": "git-runtime", "status": "prototype" },
+    { "id": "git-distribution", "status": "planned" },
+    { "id": "release-packaging", "status": "planned" }
   ]
 }

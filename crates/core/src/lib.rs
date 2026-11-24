@@ -1,6 +1,13 @@
 //! UI-independent repository models.
 use std::path::PathBuf;
 
+/// Read-only version reported by the Git executable resolved through PATH.
+/// This observation does not pin the binary used by later repository operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitRuntime {
+    pub version: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repository {
     pub path: PathBuf,

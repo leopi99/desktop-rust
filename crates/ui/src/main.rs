@@ -4,7 +4,7 @@ mod layout;
 
 use desktop_core::{
     CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, FileChange,
-    FileDiff, LocalBranch, MergeKind, MergePreview, RebaseKind, RebasePreview, Remote,
+    FileDiff, GitRuntime, LocalBranch, MergeKind, MergePreview, RebaseKind, RebasePreview, Remote,
     RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
@@ -22,10 +22,13 @@ enum Panel {
     Remotes,
     Stashes,
     Repository,
+    Git,
 }
 
 #[derive(Default)]
 struct Desktop {
+    git_runtime: Option<Result<GitRuntime, String>>,
+    checking_git: bool,
     panel: Panel,
     capture: Option<std::path::PathBuf>,
     capture_frames: u8,
@@ -74,6 +77,8 @@ struct Desktop {
 #[derive(Debug, Clone)]
 enum Message {
     PanelSelected(Panel),
+    CheckGitRuntime,
+    GitRuntimeLoaded(Result<GitRuntime, String>),
     CaptureFrame,
     Captured(iced::window::Screenshot),
     PathChanged(String),
@@ -234,6 +239,15 @@ fn transfer_worker<T: Send + 'static>(
 impl Desktop {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::CheckGitRuntime if !self.checking_git => {
+                self.checking_git = true;
+                self.git_runtime = None;
+                return worker(desktop_git::git_runtime, Message::GitRuntimeLoaded);
+            }
+            Message::GitRuntimeLoaded(result) => {
+                self.checking_git = false;
+                self.git_runtime = Some(result);
+            }
             Message::PanelSelected(panel) if !self.loading => {
                 self.delete_branch_pending = None;
                 self.panel = panel;
@@ -1389,7 +1403,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let size = start.size;
     let capturing = start.capture.is_some();
-    let app = start.initialize()?;
+    let mut app = start.initialize()?;
+    let startup = app.update(Message::CheckGitRuntime);
     let success = app.capture_success.clone();
     iced::application("Desktop Rust", Desktop::update, Desktop::view)
         .window(iced::window::Settings {
@@ -1398,13 +1413,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         })
         .subscription(|app: &Desktop| {
-            if app.capture.is_some() && !app.loading && app.capture_frames < 4 {
+            if app.capture.is_some() && !app.loading && !app.checking_git && app.capture_frames < 4
+            {
                 iced::window::frames().map(|_| Message::CaptureFrame)
             } else {
                 iced::Subscription::none()
             }
         })
-        .run_with(|| (app, Task::none()))?;
+        .run_with(|| (app, startup))?;
     if capturing && !success.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("Window closed before a successful capture".into());
     }
@@ -2710,5 +2726,48 @@ mod tests {
             let _ = app.update(Message::RequestDeleteBranch);
             assert!(app.delete_branch_pending.is_none(), "{state}");
         }
+    }
+    #[test]
+    fn runtime_check_is_read_only_and_does_not_lock_repository_navigation() {
+        let mut app = delete_app();
+        let before = app.snapshot.clone();
+        let _ = app.update(Message::CheckGitRuntime);
+        assert!(app.checking_git);
+        assert!(!app.loading);
+        assert_eq!(app.snapshot, before);
+        assert_eq!(app.summary, "Summary");
+        let _ = app.update(Message::PanelSelected(Panel::Git));
+        assert_eq!(app.panel, Panel::Git);
+        assert_eq!(app.snapshot, before);
+        assert!(app.notice.is_empty());
+    }
+
+    #[test]
+    fn runtime_failure_does_not_discard_repository_or_drafts_and_allows_retry() {
+        let mut app = loaded();
+        app.checking_git = true;
+        let before = app.snapshot.clone();
+        let _ = app.update(Message::GitRuntimeLoaded(Err("Install Git".into())));
+        assert!(!app.checking_git);
+        assert!(app.git_runtime.as_ref().unwrap().is_err());
+        assert_eq!(app.snapshot, before);
+        assert_eq!(app.summary, "Summary");
+        let _ = app.update(Message::CheckGitRuntime);
+        assert!(app.checking_git);
+        assert!(app.git_runtime.is_none());
+    }
+
+    #[test]
+    fn runtime_result_does_not_complete_or_redirect_an_active_repository_write() {
+        let mut app = loaded();
+        app.loading = true;
+        app.checking_git = true;
+        let _ = app.update(Message::GitRuntimeLoaded(Ok(GitRuntime {
+            version: "2.56.1".into(),
+        })));
+        assert!(app.loading);
+        assert!(!app.checking_git);
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.git_runtime.unwrap().unwrap().version, "2.56.1");
     }
 }
