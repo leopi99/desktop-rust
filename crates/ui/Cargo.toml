@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 desktop-core = { path = "../core" }
 desktop-git = { path = "../git" }
-iced = "0.13"
+iced = { version = "0.13", features = ["advanced"] }
+png = "0.17"
