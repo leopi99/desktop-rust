@@ -428,6 +428,7 @@ impl Desktop {
             ("Remotes", Panel::Remotes),
             ("Saved changes", Panel::Stashes),
             ("Create / Clone", Panel::Repository),
+            ("Git", Panel::Git),
         ] {
             let active = self.panel == panel;
             let mut nav = button(label).width(Length::Fill).style(if active {
@@ -447,6 +448,7 @@ impl Desktop {
             Panel::Remotes => "Remotes",
             Panel::Stashes => "Saved changes",
             Panel::Repository => "Create or clone a repository",
+            Panel::Git => "Git",
         };
         let body: Element<'_, Message> = match self.panel {
             Panel::Changes | Panel::History => {
@@ -485,6 +487,21 @@ impl Desktop {
             .height(Length::Fill)
             .into(),
             Panel::Stashes => scrollable(self.stash_view()).height(Length::Fill).into(),
+            Panel::Git => {
+                let mut content =
+                    column![text("Git is required for repository operations.")].spacing(16);
+                content = match &self.git_runtime {
+                    Some(Ok(runtime)) => content.push(text(format!("Version: {}", runtime.version)).size(20))
+                        .push(text("Using Git available on PATH. Install updates through your operating system or Git installer, then recheck.")),
+                    Some(Err(error)) => content.push(text(error)),
+                    None => content.push(text(if self.checking_git { "Checking Git…" } else { "Git has not been checked yet." })),
+                };
+                let mut check = button("Recheck Git");
+                if !self.checking_git {
+                    check = check.on_press(Message::CheckGitRuntime);
+                }
+                scrollable(content.push(check)).height(Length::Fill).into()
+            }
             Panel::Repository => scrollable(
                 column![
                     text("Create a repository").size(20),

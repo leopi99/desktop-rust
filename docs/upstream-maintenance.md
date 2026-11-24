@@ -128,3 +128,10 @@ rather than bootstrap again. The next task is an inventory of this stable source
 its tests, dependency changes and release notes before any analysis/parity claim.
 The bootstrap deliberately does not import all older publications; it does not
 prove that their behavior is implemented in Rust.
+
+## Initial baseline triage
+
+The [3.6.11 triage](upstream/release-3.6.11.md) records the complete 3.6.10-to-3.6.11
+release interval and its packaging/dependency dispositions. It does not complete
+the full baseline inventory or advance analysis/parity. Git runtime diagnostics
+report the external engine but do not fulfill the deferred bundled-Git update.

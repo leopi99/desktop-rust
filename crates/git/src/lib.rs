@@ -2,6 +2,8 @@
 mod branches;
 mod conflicts;
 pub use conflicts::{inspect_conflict, resolve_conflict};
+mod runtime;
+pub use runtime::git_runtime;
 mod history;
 mod init;
 pub use history::{commit_details, commit_file_diff, commit_history};
@@ -29,15 +31,10 @@ use std::{
 };
 pub use transfer::TransferControl;
 
-/// Bind every Git child to the requested repository, even when the app is
-/// launched from a hook or shell that exported another repository's Git paths.
-fn git_command(path: &Path) -> Command {
+/// Build Git processes with inherited repository-routing variables removed.
+fn base_git_command() -> Command {
     let mut command = Command::new("git");
-    command
-        .arg("--literal-pathspecs")
-        .arg("-C")
-        .arg(path)
-        .env("GIT_TERMINAL_PROMPT", "0");
+    command.env("GIT_TERMINAL_PROMPT", "0");
     for key in [
         "GIT_DIR",
         "GIT_COMMON_DIR",
@@ -51,6 +48,13 @@ fn git_command(path: &Path) -> Command {
     ] {
         command.env_remove(key);
     }
+    command
+}
+
+/// Bind repository operations to the requested path, independently of Git's cwd.
+fn git_command(path: &Path) -> Command {
+    let mut command = base_git_command();
+    command.arg("--literal-pathspecs").arg("-C").arg(path);
     command
 }
 

@@ -16,5 +16,33 @@
       "status": "pending-analysis"
     }
   ],
-  "changes": []
+  "changes": [
+    {
+      "id": "release-3.6.11-git-distribution",
+      "release": "release-3.6.11",
+      "feature": "git-distribution",
+      "upstream": ["ee3e0297e109a560d9ae1fefef14f008b112457b"],
+      "status": "deferred",
+      "reason": "Upstream bundles Git 2.56.1 through dugite 3.3.3. The Rust prototype resolves system Git through PATH and does not package, pin or update Git. Runtime diagnostics expose the detected version but do not implement the bundled-engine update. Packaging and a reviewed engine-update policy remain planned."
+    },
+    {
+      "id": "release-3.6.11-hotfix-runners",
+      "release": "release-3.6.11",
+      "feature": "release-packaging",
+      "upstream": ["0102f49aa6c8c554de558299f31b6129b502a2fe"],
+      "status": "deferred",
+      "reason": "The macOS 14 to 15 larger-runner migration applies to the original Electron hotfix CI. Rust release packaging/signing and macOS delivery are planned; the Rust checks currently use Ubuntu. Retain this as packaging work rather than claiming distribution parity."
+    },
+    {
+      "id": "release-3.6.11-release-metadata",
+      "release": "release-3.6.11",
+      "feature": "release-packaging",
+      "upstream": [
+        "29edd18eb3e49dce6a593a5361facab733092dd4",
+        "ef34b1df752a164a009ae40aca14d439c6ab1d80"
+      ],
+      "status": "not-applicable",
+      "reason": "The inherited app version and release-note wording describe upstream 3.6.11; the independent Rust preview retains its own Cargo version. No inherited Electron release metadata is rewritten as a Rust behavioral port."
+    }
+  ]
 }

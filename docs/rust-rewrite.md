@@ -106,6 +106,29 @@ confirmation have been captured and visually inspected on Linux using the
 software renderer at 960×640 and 1200×800. Interactive keyboard and complete
 end-to-end UI deletion checks remain outstanding.
 
+## Git runtime diagnostics
+
+The Git panel shows the version reported by the system Git resolved through PATH.
+The app checks it on startup using a worker thread; Recheck Git repeats the
+read-only probe. It works without an open repository. A missing Git executable
+produces an installation/PATH message instead of hiding the engine failure.
+Version vendor/development suffixes are retained. Runtime results do not unlock,
+finish or redirect repository writes and do not discard drafts or snapshots.
+
+The preview uses externally installed Git; it does not package or update Git and
+does not infer compatibility or security from the reported version. Later commands
+resolve the executable again, so a PATH/binary change can invalidate the observation.
+The diagnostic is not a prerequisite or capability gate for repository commands.
+See [the first baseline triage](upstream/release-3.6.11.md) for the distinction
+between upstream's Git 2.56.1 bundle and the current Rust engine policy.
+
+Capture the diagnostic with `--panel git`. The offline smoke fixture includes that
+panel and a separate no-repository capture with Git absent from PATH, in addition
+to the existing panels and read-only deletion review. Both diagnostic states
+were captured and visually inspected on Linux/software rendering at 960×640 and
+1200×800 on 2026-11-24; the fixture files, refs, index and config were unchanged.
+Interactive keyboard and accessibility checks remain outstanding.
+
 ## Commit history
 
 Switch between Changes and History to inspect commits without checking them out.
@@ -319,8 +342,8 @@ No credentials or original application databases are imported.
 
 ## UI layout and visual checks
 
-The sidebar separates Changes, History, Branches, Remotes, Saved changes and
-Create / Clone. File lists and diffs occupy the main workspace; commit fields
+The sidebar separates Changes, History, Branches, Remotes, Saved changes,
+Create / Clone and Git diagnostics. File lists and diffs occupy the main workspace; commit fields
 appear only in Changes. A merge/rebase banner keeps operation controls reachable
 while resolving files. Navigation preserves drafts and revokes hidden previews
 and abort/remove confirmations. Busy operations keep their current panel.
@@ -341,8 +364,9 @@ existing output files and reports failure if the window closes before capture.
 Launch-time repository inspection is read-only and happens before window creation.
 Interactive repository operations continue to use worker threads.
 
-A repeatable offline fixture captures all six panels and a read-only branch
-deletion review without touching a real project or contacting a remote:
+A repeatable offline fixture captures all seven panels, a read-only branch
+deletion review and missing-Git diagnostics without touching a real project
+or contacting a remote:
 
 ```sh
 cargo build --locked -p desktop-rust
@@ -415,7 +439,8 @@ Before publishing: create/protect `main`, set it as default, retain an unmodifie
 Automatic PR creation requires verified human ownership and the repository's
 team-authored review process; discovery currently produces review artifacts only.
 The daily stale-run watchdog and ledger/evidence validator are implemented locally.
-They still require deployment to the default branch and enabled Actions. Scheduled
+Discovery and the watchdog have completed successful manual runs on the default
+branch; see [activation evidence](upstream-maintenance.md#activation-and-initial-detection). Scheduled
 workflows cannot detect their own complete suspension; monitor Actions externally
 if unattended availability is required.
 The preview now supports local initialization, stage/unstage, commit, and branch
