@@ -442,8 +442,37 @@ impl Desktop {
             .height(Length::Fill)
             .into()
         };
-        let commit_controls: Element<'_, Message> = if self.show_history || self.snapshot.is_none()
-        {
+        let commit_controls: Element<'_, Message> = if self.show_history {
+            let mut create_at = button("Create branch at selected commit");
+            if !self.loading
+                && !self.new_branch.is_empty()
+                && self
+                    .commit_details
+                    .as_ref()
+                    .is_some_and(|details| self.history_commits.contains(&details.commit))
+                && self.snapshot.as_ref().is_some_and(|snapshot| {
+                    snapshot.commit_basis.merge_heads.is_none()
+                        && snapshot.commit_basis.rebase.is_none()
+                })
+            {
+                create_at = create_at.on_press(Message::CreateBranchAtCommit);
+            }
+            column![
+                text(
+                    self.commit_details
+                        .as_ref()
+                        .map(|details| format!("Branch start: {}", details.commit.oid))
+                        .unwrap_or_else(|| String::from("Select a commit to create a branch"))
+                )
+                .size(14),
+                text("Create a local branch here; keep the current branch checked out").size(14),
+                text_input("New branch name", &self.new_branch)
+                    .on_input(Message::BranchNameChanged),
+                create_at
+            ]
+            .spacing(6)
+            .into()
+        } else if self.snapshot.is_none() {
             column![].into()
         } else {
             column![

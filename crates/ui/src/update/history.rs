@@ -12,6 +12,7 @@ pub(super) enum Event {
     SelectCommitFile(CommitFile),
     CommitDiffLoaded(Result<String, String>),
     LoadOlderCommits,
+    CreateBranchAtCommit,
     OlderCommitsLoaded(Result<Vec<CommitSummary>, String>),
 }
 
@@ -88,6 +89,31 @@ impl Desktop {
                 self.detail = result
                     .unwrap_or_else(|error| format!("Unable to read committed diff: {error}"));
             }
+            Event::CreateBranchAtCommit
+                if !self.loading
+                    && self.show_history
+                    && self.panel == Panel::History
+                    && !self.new_branch.is_empty() =>
+            {
+                if let (Some(snapshot), Some(details)) = (&self.snapshot, &self.commit_details) {
+                    if snapshot.commit_basis.merge_heads.is_some()
+                        || snapshot.commit_basis.rebase.is_some()
+                        || !self.history_commits.contains(&details.commit)
+                    {
+                        return Task::none();
+                    }
+                    let path = snapshot.repository.path.clone();
+                    let expected = snapshot.commit_basis.clone();
+                    let oid = details.commit.oid.clone();
+                    let name = self.new_branch.clone();
+                    self.loading = true;
+                    self.notice = format!("Creating branch {name} at {oid}…");
+                    return worker(
+                        move || desktop_git::create_branch_at_commit(&path, &name, &oid, &expected),
+                        |result| Message::Wrote(crate::Operation::CreateBranchAtCommit, result),
+                    );
+                }
+            }
             Event::LoadOlderCommits
                 if !self.loading && self.show_history && self.history_has_more =>
             {
@@ -117,6 +143,7 @@ impl Desktop {
             Event::ShowHistory(..)
             | Event::SelectCommit(..)
             | Event::SelectCommitFile(..)
+            | Event::CreateBranchAtCommit
             | Event::LoadOlderCommits => {}
         }
         Task::none()

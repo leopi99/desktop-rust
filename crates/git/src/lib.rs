@@ -24,7 +24,8 @@ mod stash;
 pub use stash::{apply_stash, save_stash};
 mod transfer;
 pub use branches::{
-    create_branch, delete_local_branch, rename_current_branch, rename_local_branch, switch_branch,
+    create_branch, create_branch_at_commit, delete_local_branch, rename_current_branch,
+    rename_local_branch, switch_branch,
 };
 use desktop_core::{CommitBasis, FileChange, FileDiff, Repository, RepositorySnapshot};
 pub use remotes::{

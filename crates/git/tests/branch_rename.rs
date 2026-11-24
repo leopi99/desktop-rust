@@ -524,3 +524,135 @@ fn selected_rename_uses_the_complete_native_source_name() {
     assert_eq!(snapshot(&repo.path).unwrap().commit_basis, basis);
     assert_eq!(selected(&repo, OsStr::new("renamed")).oid, target.oid);
 }
+
+#[test]
+fn history_branch_creation_uses_the_selected_commit_without_checkout_or_tracking() {
+    let repo = Fixture::new();
+    repo.commit();
+    let old = String::from_utf8(repo.git(&["rev-parse", "HEAD"])).unwrap();
+    repo.git(&["commit", "--allow-empty", "-m", "new tip"]);
+    repo.git(&["config", "branch.autoSetupMerge", "always"]);
+    std::fs::write(repo.path.join("file.txt"), b"staged\n").unwrap();
+    repo.git(&["add", "file.txt"]);
+    std::fs::write(repo.path.join("file.txt"), b"unstaged\n").unwrap();
+    std::fs::write(repo.path.join("untracked"), b"keep\n").unwrap();
+    let before = snapshot(&repo.path).unwrap();
+    let config = repo.git(&["config", "--local", "--null", "--list"]);
+    desktop_git::create_branch_at_commit(&repo.path, "history/è", old.trim(), &before.commit_basis)
+        .unwrap();
+    let after = snapshot(&repo.path).unwrap();
+    assert_eq!(after.commit_basis, before.commit_basis);
+    assert_eq!(after.changes, before.changes);
+    assert_eq!(selected(&repo, OsStr::new("history/è")).oid, old.trim());
+    assert_eq!(repo.git(&["config", "--local", "--null", "--list"]), config);
+    assert_eq!(
+        std::fs::read(repo.path.join("file.txt")).unwrap(),
+        b"unstaged\n"
+    );
+    assert_eq!(
+        std::fs::read(repo.path.join("untracked")).unwrap(),
+        b"keep\n"
+    );
+}
+
+#[test]
+fn history_branch_creation_rejects_non_commit_ids_and_saved_destinations() {
+    let repo = Fixture::new();
+    repo.commit();
+    repo.git(&["tag", "--annotate", "v1", "-m", "tag"]);
+    repo.git(&["branch", "occupied"]);
+    repo.git(&["config", "branch.saved.description", "retain"]);
+    let basis = snapshot(&repo.path).unwrap().commit_basis;
+    let commit = String::from_utf8(repo.git(&["rev-parse", "HEAD"])).unwrap();
+    let before = repo.unchanged_state();
+    for oid in [
+        "HEAD".to_owned(),
+        commit[..7].to_owned(),
+        "0".repeat(40),
+        "--help".to_owned(),
+        String::from_utf8(repo.git(&["rev-parse", "HEAD^{tree}"]))
+            .unwrap()
+            .trim()
+            .to_owned(),
+        String::from_utf8(repo.git(&["rev-parse", "HEAD:file.txt"]))
+            .unwrap()
+            .trim()
+            .to_owned(),
+        String::from_utf8(repo.git(&["rev-parse", "refs/tags/v1"]))
+            .unwrap()
+            .trim()
+            .to_owned(),
+    ] {
+        assert!(
+            desktop_git::create_branch_at_commit(&repo.path, "new", &oid, &basis).is_err(),
+            "{oid}"
+        );
+        assert_eq!(repo.unchanged_state(), before);
+    }
+    for name in [
+        "occupied",
+        "saved",
+        "main",
+        "",
+        "-M",
+        "HEAD",
+        "@{-1}",
+        "bad..name",
+    ] {
+        assert!(
+            desktop_git::create_branch_at_commit(&repo.path, name, commit.trim(), &basis).is_err(),
+            "{name}"
+        );
+        assert_eq!(repo.unchanged_state(), before);
+    }
+}
+
+#[test]
+fn history_branch_creation_rejects_stale_state_and_active_operations() {
+    for mutation in [
+        "index",
+        "head",
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "sequencer",
+        "rebase-merge",
+    ] {
+        let repo = Fixture::new();
+        repo.commit();
+        let commit = String::from_utf8(repo.git(&["rev-parse", "HEAD"])).unwrap();
+        let basis = snapshot(&repo.path).unwrap().commit_basis;
+        match mutation {
+            "index" => {
+                std::fs::write(repo.path.join("new"), b"staged").unwrap();
+                repo.git(&["add", "new"]);
+            }
+            "head" => {
+                repo.git(&["commit", "--allow-empty", "-m", "advance"]);
+            }
+            "sequencer" | "rebase-merge" => {
+                std::fs::create_dir(repo.path.join(".git").join(mutation)).unwrap()
+            }
+            _ => std::fs::write(repo.path.join(".git").join(mutation), commit.as_bytes()).unwrap(),
+        }
+        let before = repo.unchanged_state();
+        assert!(
+            desktop_git::create_branch_at_commit(&repo.path, "new-branch", commit.trim(), &basis)
+                .is_err(),
+            "{mutation}"
+        );
+        assert_eq!(repo.unchanged_state(), before);
+    }
+}
+
+#[test]
+fn history_branch_creation_can_preserve_a_detached_head() {
+    let repo = Fixture::new();
+    repo.commit();
+    repo.git(&["switch", "--detach"]);
+    let basis = snapshot(&repo.path).unwrap().commit_basis;
+    let commit = basis.head.as_ref().unwrap().trim();
+    desktop_git::create_branch_at_commit(&repo.path, "saved-detached", commit, &basis).unwrap();
+    assert_eq!(snapshot(&repo.path).unwrap().commit_basis, basis);
+    assert_eq!(selected(&repo, OsStr::new("saved-detached")).oid, commit);
+}

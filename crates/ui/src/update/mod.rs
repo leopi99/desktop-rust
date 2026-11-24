@@ -49,6 +49,9 @@ impl Desktop {
             Message::CommitDiffLoaded(result) => {
                 self.update_history(history::Event::CommitDiffLoaded(result))
             }
+            Message::CreateBranchAtCommit => {
+                self.update_history(history::Event::CreateBranchAtCommit)
+            }
             Message::LoadOlderCommits => self.update_history(history::Event::LoadOlderCommits),
             Message::OlderCommitsLoaded(result) => {
                 self.update_history(history::Event::OlderCommitsLoaded(result))

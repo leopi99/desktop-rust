@@ -215,35 +215,7 @@ fn rename_observed_branch(
             "The selected branch changed or was deleted; refresh before renaming",
         ));
     }
-    if selected.name == OsStr::new(name)
-        || branches
-            .iter()
-            .any(|branch| branch.name == OsStr::new(name))
-    {
-        return Err(io::Error::other(
-            "The destination branch already exists; choose a different name",
-        ));
-    }
-    // An orphan configuration section can still contain valuable tracking settings.
-    if super::read_output::complete(
-        path,
-        &["config", "--local", "--null", "--list"],
-        4 * 1024 * 1024,
-    )?
-    .split(|byte| *byte == 0)
-    .any(|entry| {
-        let key = entry
-            .split(|byte| *byte == b'\n')
-            .next()
-            .unwrap_or_default();
-        key.strip_prefix(b"branch.")
-            .and_then(|key| key.rsplitn(2, |byte| *byte == b'.').nth(1))
-            == Some(name.as_bytes())
-    }) {
-        return Err(io::Error::other(
-            "The destination already has branch configuration; choose another name",
-        ));
-    }
+    ensure_destination_available(path, name, &branches)?;
     let mut full_ref = std::ffi::OsString::from("refs/heads/");
     full_ref.push(&selected.name);
     let is_current = expected.branch.as_ref() == Some(&full_ref);
@@ -276,6 +248,77 @@ fn rename_observed_branch(
     Ok(format!(
         "Renamed {} to {name}. Remote branch names are unchanged.",
         selected.name.to_string_lossy()
+    ))
+}
+
+fn ensure_destination_available(
+    path: &Path,
+    name: &str,
+    branches: &[LocalBranch],
+) -> io::Result<()> {
+    if branches
+        .iter()
+        .any(|branch| branch.name == OsStr::new(name))
+    {
+        return Err(io::Error::other(
+            "The destination branch already exists; choose a different name",
+        ));
+    }
+    // An orphan configuration section can still contain valuable tracking settings.
+    if super::read_output::complete(
+        path,
+        &["config", "--local", "--null", "--list"],
+        4 * 1024 * 1024,
+    )?
+    .split(|byte| *byte == 0)
+    .any(|entry| {
+        let key = entry
+            .split(|byte| *byte == b'\n')
+            .next()
+            .unwrap_or_default();
+        key.strip_prefix(b"branch.")
+            .and_then(|key| key.rsplitn(2, |byte| *byte == b'.').nth(1))
+            == Some(name.as_bytes())
+    }) {
+        return Err(io::Error::other(
+            "The destination already has branch configuration; choose another name",
+        ));
+    }
+    Ok(())
+}
+
+/// Create a local branch at an immutable commit without checking it out.
+/// Dirty files/index and the current branch remain in place. No tracking or
+/// remote operation is requested, and existing refs/configuration are preserved.
+/// External clients can still race preflight checks; Git owns ref locking.
+///
+/// # Errors
+///
+/// Returns an error for non-full/non-commit IDs, occupied or invalid names,
+/// stale source state, active operations, bounded-read failures or Git rejection.
+pub fn create_branch_at_commit(
+    path: &Path,
+    name: &str,
+    oid: &str,
+    expected: &CommitBasis,
+) -> io::Result<String> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("Write lock poisoned"))?;
+    validate_name(path, name)?;
+    super::history::validate_oid(oid)?;
+    validate_basis(path, expected)?;
+    super::merge::ensure_idle(path)?;
+    ensure_destination_available(path, name, &list(path)?)?;
+    if super::read_output::complete(path, &["cat-file", "-t", oid], 64 * 1024)? != b"commit\n" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Select a commit object before creating a branch",
+        ));
+    }
+    run_write(path, &["branch", "--no-track", "--", name, oid], None)?;
+    Ok(format!(
+        "Created local branch {name} at {oid}; current branch unchanged"
     ))
 }
 

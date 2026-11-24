@@ -49,7 +49,10 @@ impl Desktop {
                         if matches!(operation, Operation::RenameBranch) {
                             self.rename_branch.clear();
                         }
-                        if matches!(operation, Operation::CreateBranch) {
+                        if matches!(
+                            operation,
+                            Operation::CreateBranch | Operation::CreateBranchAtCommit
+                        ) {
                             self.new_branch.clear();
                         }
                         if let Operation::RemoteConfig(action) = operation {

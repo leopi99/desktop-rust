@@ -94,6 +94,7 @@ enum Message {
     SelectCommitFile(CommitFile),
     CommitDiffLoaded(Result<String, String>),
     LoadOlderCommits,
+    CreateBranchAtCommit,
     OlderCommitsLoaded(Result<Vec<CommitSummary>, String>),
     Select(FileChange),
     DiffLoaded(Result<FileDiff, String>),
@@ -169,6 +170,7 @@ enum Operation {
     ResolveConflict,
     Commit,
     CreateBranch,
+    CreateBranchAtCommit,
     RenameBranch,
     DeleteBranch,
     SwitchBranch,
@@ -1354,6 +1356,96 @@ mod tests {
         app.reset_history(&snapshot);
         let _ = app.update(Message::ShowHistory(true));
         app
+    }
+
+    fn branch_from_history_app() -> Desktop {
+        let mut app = history_app();
+        app.new_branch = "from-history".into();
+        app.rename_branch = "rename draft".into();
+        app.commit_details = Some(CommitDetails {
+            commit: history_commit(1),
+            parents: Vec::new(),
+            message: "body".into(),
+            files: Vec::new(),
+        });
+        app
+    }
+
+    #[test]
+    fn history_branch_creation_keeps_the_panel_and_blocks_busy_redirection() {
+        let mut app = branch_from_history_app();
+        let _ = app.update(Message::CreateBranchAtCommit);
+        assert!(app.loading);
+        assert!(app.show_history);
+        assert_eq!(app.panel, Panel::History);
+        assert!(app.notice.contains(&history_commit(1).oid));
+        let _ = app.update(Message::BranchNameChanged("redirect".into()));
+        let _ = app.update(Message::SelectCommit(history_commit(2)));
+        let _ = app.update(Message::CreateBranchAtCommit);
+        assert_eq!(app.new_branch, "from-history");
+        assert_eq!(
+            app.commit_details.as_ref().unwrap().commit,
+            history_commit(1)
+        );
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+    }
+
+    #[test]
+    fn history_branch_creation_requires_observed_selection_name_and_idle_history() {
+        for state in [
+            "missing",
+            "unobserved",
+            "empty",
+            "panel",
+            "hidden",
+            "merge",
+            "rebase",
+            "repository",
+        ] {
+            let mut app = branch_from_history_app();
+            match state {
+                "missing" => app.commit_details = None,
+                "unobserved" => app.history_commits.clear(),
+                "empty" => app.new_branch.clear(),
+                "panel" => app.panel = Panel::Branches,
+                "hidden" => app.show_history = false,
+                "merge" => {
+                    app.snapshot.as_mut().unwrap().commit_basis.merge_heads =
+                        Some(b"parent".to_vec())
+                }
+                "rebase" => {
+                    app.snapshot.as_mut().unwrap().commit_basis.rebase =
+                        pending_rebase().snapshot.unwrap().commit_basis.rebase
+                }
+                _ => app.snapshot = None,
+            }
+            let _ = app.update(Message::CreateBranchAtCommit);
+            assert!(!app.loading, "{state}");
+            assert_eq!(app.summary, "Summary");
+        }
+    }
+
+    #[test]
+    fn history_branch_completion_preserves_panel_and_unrelated_drafts_and_refreshes() {
+        for success in [false, true] {
+            let mut app = branch_from_history_app();
+            let _ = app.update(Message::Wrote(
+                Operation::CreateBranchAtCommit,
+                if success {
+                    Ok("Created".into())
+                } else {
+                    Err("occupied".into())
+                },
+            ));
+            assert!(app.loading);
+            assert!(app.show_history);
+            assert_eq!(app.panel, Panel::History);
+            assert_eq!(app.new_branch, if success { "" } else { "from-history" });
+            assert_eq!(app.rename_branch, "rename draft");
+            assert_eq!(app.summary, "Summary");
+            assert_eq!(app.description, "Details");
+        }
     }
 
     #[test]
