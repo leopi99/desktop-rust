@@ -114,6 +114,147 @@ pub fn switch_branch(
     Ok(format!("Switched to {}", selected.name.to_string_lossy()))
 }
 
+/// Rename the observed current local branch without overwriting another ref.
+/// Git moves its reflog and local branch configuration; index and files stay put.
+/// Unborn/detached HEAD and active sequencers require a different workflow.
+/// External clients can still race after these preflight checks.
+pub fn rename_current_branch(
+    path: &Path,
+    name: &str,
+    expected: &CommitBasis,
+) -> io::Result<String> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("Write lock poisoned"))?;
+    validate_name(path, name)?;
+    validate_basis(path, expected)?;
+    super::merge::ensure_idle(path)?;
+    let source = expected
+        .branch
+        .as_ref()
+        .and_then(|branch| branch.as_encoded_bytes().strip_prefix(b"refs/heads/"))
+        .filter(|branch| !branch.is_empty())
+        .ok_or_else(|| io::Error::other("Select a committed local branch before renaming"))?;
+    if expected.head.is_none() {
+        return Err(io::Error::other(
+            "Create the first commit before renaming this branch",
+        ));
+    }
+    if source == name.as_bytes()
+        || list(path)?
+            .iter()
+            .any(|branch| branch.name == OsStr::new(name))
+    {
+        return Err(io::Error::other(
+            "The destination branch already exists; choose a different name",
+        ));
+    }
+    // An orphan configuration section can still contain valuable tracking settings.
+    if read_bytes(path, &["config", "--local", "--null", "--list"])?
+        .split(|byte| *byte == 0)
+        .any(|entry| {
+            let key = entry
+                .split(|byte| *byte == b'\n')
+                .next()
+                .unwrap_or_default();
+            key.strip_prefix(b"branch.")
+                .and_then(|key| key.rsplitn(2, |byte| *byte == b'.').nth(1))
+                == Some(name.as_bytes())
+        })
+    {
+        return Err(io::Error::other(
+            "The destination already has branch configuration; choose another name",
+        ));
+    }
+    let full_ref = expected
+        .branch
+        .as_ref()
+        .expect("validated branch")
+        .as_encoded_bytes();
+    if read_bytes(path, &["worktree", "list", "--porcelain", "-z"])?
+        .split(|byte| *byte == 0)
+        .filter(|entry| entry.strip_prefix(b"branch ") == Some(full_ref))
+        .count()
+        > 1
+    {
+        return Err(io::Error::other(
+            "This branch is also checked out in another worktree",
+        ));
+    }
+    let source = file_path(source)?.into_os_string();
+    run_write(
+        path,
+        &[
+            OsStr::new("branch"),
+            OsStr::new("--move"),
+            OsStr::new("--"),
+            source.as_os_str(),
+            OsStr::new(name),
+        ],
+        None,
+    )?;
+    Ok(format!(
+        "Renamed {} to {name}. Remote branch names are unchanged.",
+        source.to_string_lossy()
+    ))
+}
+
+/// Delete an observed non-current local branch only when its tip is merged into
+/// the current HEAD. Git also checks its upstream and linked-worktree use.
+/// No forced deletion or remote operation is performed. External clients can
+/// still race between preflight checks and Git acquiring its own ref locks.
+pub fn delete_local_branch(
+    path: &Path,
+    selected: &LocalBranch,
+    expected: &CommitBasis,
+) -> io::Result<String> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("Write lock poisoned"))?;
+    validate_basis(path, expected)?;
+    super::merge::ensure_idle(path)?;
+    let (Some(current), Some(head)) = (&expected.branch, &expected.head) else {
+        return Err(io::Error::other(
+            "Select a committed local branch before deleting another branch",
+        ));
+    };
+    let mut full_ref = std::ffi::OsString::from("refs/heads/");
+    full_ref.push(&selected.name);
+    if selected.is_current || &full_ref == current {
+        return Err(io::Error::other("Cannot delete the current branch"));
+    }
+    if selected.name.as_encoded_bytes().starts_with(b"-") || selected.name == OsStr::new("HEAD") {
+        return Err(io::Error::other("Unsupported reserved branch name"));
+    }
+    if !list(path)?
+        .iter()
+        .any(|branch| branch.name == selected.name && branch.oid == selected.oid)
+    {
+        return Err(io::Error::other(
+            "The selected branch changed or was deleted; refresh before deleting",
+        ));
+    }
+    if !super::merge::ancestor(path, &selected.oid, head.trim())? {
+        return Err(io::Error::other(
+            "The selected branch contains commits not merged into the current branch",
+        ));
+    }
+    run_write(
+        path,
+        &[
+            OsStr::new("branch"),
+            OsStr::new("--delete"),
+            OsStr::new("--"),
+            selected.name.as_os_str(),
+        ],
+        None,
+    )?;
+    Ok(format!(
+        "Deleted local branch {}. Remote branches are unchanged.",
+        selected.name.to_string_lossy()
+    ))
+}
+
 /// Validate a literal local branch name without expanding previous-checkout shorthand.
 pub(super) fn validate_name(path: &Path, name: &str) -> io::Result<()> {
     if name.is_empty() || name.starts_with('-') || name == "HEAD" {

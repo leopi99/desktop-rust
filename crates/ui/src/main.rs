@@ -1,6 +1,11 @@
+mod capture;
+mod clip;
+mod layout;
+
 use desktop_core::{
-    ConflictContent, ConflictReview, FileChange, FileDiff, LocalBranch, MergeKind, MergePreview,
-    RebaseKind, RebasePreview, Remote, RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
+    CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, FileChange,
+    FileDiff, LocalBranch, MergeKind, MergePreview, RebaseKind, RebasePreview, Remote,
+    RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
 use iced::futures::SinkExt;
@@ -8,17 +13,39 @@ use iced::widget::{button, column, pick_list, row, scrollable, text, text_input}
 use iced::{Element, Length, Task};
 use std::{path::Path, time::Duration};
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Panel {
+    #[default]
+    Changes,
+    History,
+    Branches,
+    Remotes,
+    Stashes,
+    Repository,
+}
+
 #[derive(Default)]
 struct Desktop {
+    panel: Panel,
+    capture: Option<std::path::PathBuf>,
+    capture_frames: u8,
+    capture_success: std::sync::Arc<std::sync::atomic::AtomicBool>,
     path: String,
     snapshot: Option<RepositorySnapshot>,
     detail: String,
+    show_history: bool,
+    history_commits: Vec<CommitSummary>,
+    history_head: Option<String>,
+    history_has_more: bool,
+    commit_details: Option<CommitDetails>,
     loading: bool,
     summary: String,
     description: String,
     notice: String,
     new_branch: String,
+    rename_branch: String,
     target_branch: Option<LocalBranch>,
+    delete_branch_pending: Option<LocalBranch>,
     merge_preview: Option<MergePreview>,
     abort_merge_pending: bool,
     rebase_preview: Option<RebasePreview>,
@@ -46,9 +73,19 @@ struct Desktop {
 
 #[derive(Debug, Clone)]
 enum Message {
+    PanelSelected(Panel),
+    CaptureFrame,
+    Captured(iced::window::Screenshot),
     PathChanged(String),
     Open,
     Loaded(Result<RepositorySnapshot, String>),
+    ShowHistory(bool),
+    SelectCommit(CommitSummary),
+    CommitLoaded(Result<CommitDetails, String>),
+    SelectCommitFile(CommitFile),
+    CommitDiffLoaded(Result<String, String>),
+    LoadOlderCommits,
+    OlderCommitsLoaded(Result<Vec<CommitSummary>, String>),
     Select(FileChange),
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
@@ -60,6 +97,11 @@ enum Message {
     DescriptionChanged(String),
     Commit,
     BranchNameChanged(String),
+    RenameBranchNameChanged(String),
+    RenameCurrentBranch,
+    RequestDeleteBranch,
+    CancelDeleteBranch,
+    DeleteBranch,
     BranchSelected(LocalBranch),
     CreateBranch,
     SwitchBranch,
@@ -111,6 +153,8 @@ enum Operation {
     ResolveConflict,
     Commit,
     CreateBranch,
+    RenameBranch,
+    DeleteBranch,
     SwitchBranch,
     Remote,
     RemoteConfig(RemoteEdit),
@@ -190,6 +234,136 @@ fn transfer_worker<T: Send + 'static>(
 impl Desktop {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::PanelSelected(panel) if !self.loading => {
+                self.delete_branch_pending = None;
+                self.panel = panel;
+                self.show_history = panel == Panel::History;
+                self.show_stashes = panel == Panel::Stashes;
+                self.show_remote_settings = panel == Panel::Remotes;
+                self.abort_merge_pending = false;
+                self.abort_rebase_pending = false;
+                self.remote_remove_pending = false;
+                if matches!(panel, Panel::Changes | Panel::History) {
+                    return self.update(Message::ShowHistory(panel == Panel::History));
+                }
+                self.conflict_review = None;
+                self.merge_preview = None;
+                self.rebase_preview = None;
+            }
+            Message::CaptureFrame => {
+                self.capture_frames += 1;
+                if self.capture_frames == 4 {
+                    return iced::window::get_latest()
+                        .and_then(iced::window::screenshot)
+                        .map(Message::Captured);
+                }
+            }
+            Message::Captured(screenshot) => {
+                if let Some(path) = self.capture.take() {
+                    match capture::save(&path, &screenshot) {
+                        Ok(()) => self
+                            .capture_success
+                            .store(true, std::sync::atomic::Ordering::SeqCst),
+                        Err(error) => eprintln!("Capture failed: {error}"),
+                    }
+                }
+                return iced::exit();
+            }
+            Message::ShowHistory(show) if !self.loading => {
+                self.delete_branch_pending = None;
+                self.panel = if show { Panel::History } else { Panel::Changes };
+                self.show_history = show;
+                self.commit_details = None;
+                self.conflict_review = None;
+                self.merge_preview = None;
+                self.rebase_preview = None;
+                self.detail = if show {
+                    String::from("Select a commit to inspect its message and files")
+                } else {
+                    self.snapshot
+                        .as_ref()
+                        .map(|s| format!("{}\n\nRecent commits\n{}", s.status, s.history))
+                        .unwrap_or_default()
+                };
+            }
+            Message::SelectCommit(commit) if !self.loading && self.show_history => {
+                if let Some(snapshot) = &self.snapshot {
+                    if !self.history_commits.contains(&commit) {
+                        return Task::none();
+                    }
+                    let path = snapshot.repository.path.clone();
+                    self.loading = true;
+                    self.commit_details = None;
+                    self.detail = format!("Loading commit {}…", commit.oid);
+                    return worker(
+                        move || desktop_git::commit_details(&path, &commit.oid),
+                        Message::CommitLoaded,
+                    );
+                }
+            }
+            Message::CommitLoaded(result) => {
+                self.loading = false;
+                match result {
+                    Ok(details) => {
+                        self.detail = format!(
+                            "Commit {}\nAuthor: {}\nDate: {}\nParents: {}\n\n{}",
+                            details.commit.oid,
+                            details.commit.author,
+                            details.commit.authored_at,
+                            details.parents.join(", "),
+                            details.message
+                        );
+                        self.commit_details = Some(details);
+                    }
+                    Err(error) => {
+                        self.commit_details = None;
+                        self.detail = format!("Unable to read commit: {error}");
+                    }
+                }
+            }
+            Message::SelectCommitFile(file) if !self.loading && self.show_history => {
+                if let (Some(snapshot), Some(details)) = (&self.snapshot, &self.commit_details) {
+                    let path = snapshot.repository.path.clone();
+                    let oid = details.commit.oid.clone();
+                    self.loading = true;
+                    self.detail = format!("Loading committed diff for {}…", file.path.display());
+                    return worker(
+                        move || desktop_git::commit_file_diff(&path, &oid, &file),
+                        Message::CommitDiffLoaded,
+                    );
+                }
+            }
+            Message::CommitDiffLoaded(result) => {
+                self.loading = false;
+                self.detail = result
+                    .unwrap_or_else(|error| format!("Unable to read committed diff: {error}"));
+            }
+            Message::LoadOlderCommits
+                if !self.loading && self.show_history && self.history_has_more =>
+            {
+                if let (Some(snapshot), Some(head)) = (&self.snapshot, &self.history_head) {
+                    let path = snapshot.repository.path.clone();
+                    let head = head.clone();
+                    let offset = self.history_commits.len();
+                    self.loading = true;
+                    self.notice = String::from("Loading older commits…");
+                    return worker(
+                        move || desktop_git::commit_history(&path, head.trim(), offset),
+                        Message::OlderCommitsLoaded,
+                    );
+                }
+            }
+            Message::OlderCommitsLoaded(result) => {
+                self.loading = false;
+                match result {
+                    Ok(commits) => {
+                        self.history_has_more = commits.len() == 100;
+                        self.history_commits.extend(commits);
+                        self.notice.clear();
+                    }
+                    Err(error) => self.notice = format!("Unable to load older commits: {error}"),
+                }
+            }
             Message::ToggleStashes => self.show_stashes = !self.show_stashes,
             Message::StashSelected(stash) if !self.loading => self.selected_stash = Some(stash),
             Message::StashMessageChanged(value) if !self.loading => self.stash_message = value,
@@ -231,8 +405,10 @@ impl Desktop {
                 self.transfer_progress = output.replace('\r', "\n");
             }
             Message::PathChanged(path) if !self.loading => {
+                self.delete_branch_pending = None;
                 self.path = path;
                 self.snapshot = None;
+                self.clear_history();
                 self.conflict_review = None;
                 self.merge_preview = None;
                 self.rebase_preview = None;
@@ -243,6 +419,7 @@ impl Desktop {
                 self.summary.clear();
                 self.description.clear();
                 self.new_branch.clear();
+                self.rename_branch.clear();
                 self.target_branch = None;
                 self.select_remote(None);
                 self.remote_after_refresh = None;
@@ -282,7 +459,9 @@ impl Desktop {
                 self.clone_destination = value
             }
             Message::BranchNameChanged(value) if !self.loading => self.new_branch = value,
+            Message::RenameBranchNameChanged(value) if !self.loading => self.rename_branch = value,
             Message::BranchSelected(branch) if !self.loading => {
+                self.delete_branch_pending = None;
                 self.target_branch = Some(branch);
                 self.merge_preview = None;
                 self.rebase_preview = None;
@@ -290,6 +469,11 @@ impl Desktop {
             Message::SummaryChanged(value) if !self.loading => self.summary = value,
             Message::DescriptionChanged(value) if !self.loading => self.description = value,
             Message::Open if !self.loading => {
+                self.delete_branch_pending = None;
+                if self.snapshot.is_none() {
+                    self.panel = Panel::Changes;
+                    self.show_history = false;
+                }
                 self.loading = true;
                 self.snapshot = None;
                 self.target_branch = None;
@@ -310,6 +494,7 @@ impl Desktop {
                 );
             }
             Message::Loaded(result) => {
+                self.delete_branch_pending = None;
                 self.loading = false;
                 match result {
                     Ok(snapshot) => {
@@ -326,6 +511,7 @@ impl Desktop {
                             "{}\n\nRecent commits\n{}",
                             snapshot.status, snapshot.history
                         );
+                        self.reset_history(&snapshot);
                         self.snapshot = Some(snapshot);
                     }
                     Err(error) => self.detail = format!("Unable to open repository: {error}"),
@@ -460,6 +646,63 @@ impl Desktop {
                         move || desktop_git::create_branch(&path, &name, &expected),
                         |result| Message::Wrote(Operation::CreateBranch, result),
                     );
+                }
+            }
+            Message::RenameCurrentBranch if !self.loading && !self.rename_branch.is_empty() => {
+                if let Some(snapshot) = &self.snapshot {
+                    if snapshot.commit_basis.branch.is_none()
+                        || snapshot.commit_basis.head.is_none()
+                        || snapshot.commit_basis.merge_heads.is_some()
+                        || snapshot.commit_basis.rebase.is_some()
+                    {
+                        self.notice = String::from(
+                            "Select a committed local branch with no merge or rebase in progress",
+                        );
+                        return Task::none();
+                    }
+                    let path = snapshot.repository.path.clone();
+                    let expected = snapshot.commit_basis.clone();
+                    let name = self.rename_branch.clone();
+                    self.loading = true;
+                    self.notice = String::from("Renaming current branch…");
+                    return worker(
+                        move || desktop_git::rename_current_branch(&path, &name, &expected),
+                        |result| Message::Wrote(Operation::RenameBranch, result),
+                    );
+                }
+            }
+            Message::RequestDeleteBranch if !self.loading && self.panel == Panel::Branches => {
+                self.delete_branch_pending = None;
+                if let (Some(snapshot), Some(branch)) = (&self.snapshot, &self.target_branch) {
+                    if snapshot.commit_basis.branch.is_some()
+                        && snapshot.commit_basis.head.is_some()
+                        && snapshot.commit_basis.merge_heads.is_none()
+                        && snapshot.commit_basis.rebase.is_none()
+                        && !branch.is_current
+                        && snapshot.branches.contains(branch)
+                    {
+                        self.delete_branch_pending = Some(branch.clone());
+                    }
+                }
+            }
+            Message::CancelDeleteBranch => self.delete_branch_pending = None,
+            Message::DeleteBranch if !self.loading && self.panel == Panel::Branches => {
+                if let Some(branch) = self.delete_branch_pending.take() {
+                    if let Some(snapshot) = &self.snapshot {
+                        if self.target_branch.as_ref() != Some(&branch)
+                            || !snapshot.branches.contains(&branch)
+                        {
+                            return Task::none();
+                        }
+                        let path = snapshot.repository.path.clone();
+                        let expected = snapshot.commit_basis.clone();
+                        self.loading = true;
+                        self.notice = String::from("Deleting reviewed local branch…");
+                        return worker(
+                            move || desktop_git::delete_local_branch(&path, &branch, &expected),
+                            |result| Message::Wrote(Operation::DeleteBranch, result),
+                        );
+                    }
                 }
             }
             Message::SwitchBranch if !self.loading => {
@@ -744,6 +987,21 @@ impl Desktop {
                 }
             }
             Message::Wrote(operation, result) => {
+                self.delete_branch_pending = None;
+                if matches!(
+                    operation,
+                    Operation::Merge
+                        | Operation::Rebase
+                        | Operation::ContinueRebase
+                        | Operation::AbortMerge
+                        | Operation::AbortRebase
+                        | Operation::ApplyStash
+                        | Operation::CreateBranch
+                        | Operation::SwitchBranch
+                ) {
+                    self.panel = Panel::Changes;
+                    self.show_history = false;
+                }
                 self.conflict_review = None;
                 self.merge_preview = None;
                 self.rebase_preview = None;
@@ -761,6 +1019,9 @@ impl Desktop {
                         }
                         if matches!(operation, Operation::SaveStash) {
                             self.stash_message.clear();
+                        }
+                        if matches!(operation, Operation::RenameBranch) {
+                            self.rename_branch.clear();
                         }
                         if matches!(operation, Operation::CreateBranch) {
                             self.new_branch.clear();
@@ -797,6 +1058,7 @@ impl Desktop {
                 }
             }
             Message::Refreshed(result) => {
+                self.delete_branch_pending = None;
                 self.loading = false;
                 match result {
                     Ok(snapshot) => {
@@ -841,6 +1103,7 @@ impl Desktop {
                                 .find(|stash| stash.oid == selected.oid)
                                 .cloned()
                         });
+                        self.reset_history(&snapshot);
                         self.snapshot = Some(snapshot);
                     }
                     Err(error) => {
@@ -854,6 +1117,24 @@ impl Desktop {
             _ => {}
         }
         Task::none()
+    }
+
+    fn clear_history(&mut self) {
+        self.show_history = false;
+        self.history_commits.clear();
+        self.history_head = None;
+        self.history_has_more = false;
+        self.commit_details = None;
+    }
+
+    fn reset_history(&mut self, snapshot: &RepositorySnapshot) {
+        self.history_head = snapshot.commit_basis.head.clone();
+        self.history_commits = snapshot.commits.clone();
+        self.history_has_more = snapshot.commits.len() == 100;
+        self.commit_details = None;
+        if self.show_history {
+            self.detail = String::from("Select a commit to inspect its message and files");
+        }
     }
 
     fn remote_name(&self) -> &str {
@@ -1036,8 +1317,12 @@ impl Desktop {
     }
 
     fn open_created_repository(&mut self, path: std::path::PathBuf, notice: &str) -> Task<Message> {
+        self.delete_branch_pending = None;
+        self.panel = Panel::Changes;
+        self.show_history = false;
         self.path = path.to_string_lossy().into_owned();
         self.snapshot = None;
+        self.clear_history();
         self.conflict_review = None;
         self.merge_preview = None;
         self.rebase_preview = None;
@@ -1055,6 +1340,7 @@ impl Desktop {
         self.summary.clear();
         self.description.clear();
         self.new_branch.clear();
+        self.rename_branch.clear();
         self.detail.clear();
         self.notice = notice.to_owned();
         self.loading = true;
@@ -1095,332 +1381,34 @@ impl Desktop {
             |result| Message::Wrote(Operation::Index, result),
         )
     }
-
-    fn view(&self) -> Element<'_, Message> {
-        let mut files = column![text("Changed files").size(20)].spacing(6);
-        if let Some(snapshot) = &self.snapshot {
-            if snapshot.changes.is_empty() {
-                files = files.push(text("Working tree clean"));
-            }
-            for change in &snapshot.changes {
-                let label = format!(
-                    "{}{}  {}",
-                    change.index,
-                    change.worktree,
-                    change.path.display()
-                );
-                let mut control = button(text(label));
-                if !self.loading {
-                    control = control.on_press(Message::Select(change.clone()));
-                }
-                let mut stage = button("Stage");
-                let mut unstage = button("Unstage");
-                if !self.loading && change.can_stage() {
-                    stage = stage.on_press(Message::Stage(change.clone()));
-                }
-                if !self.loading && change.can_unstage() {
-                    unstage = unstage.on_press(Message::Unstage(change.clone()));
-                }
-                files = files.push(control);
-                if change.is_conflicted() {
-                    let mut review = button("Review conflict");
-                    if !self.loading {
-                        review = review.on_press(Message::ReviewConflict(change.clone()));
-                    }
-                    files = files.push(review);
-                } else {
-                    files = files.push(row![stage, unstage].spacing(6));
-                }
-            }
-        }
-        if let Some(review) = &self.conflict_review {
-            let mut resolve = button("Mark reviewed file resolved");
-            if !self.loading && review.marker_count == 0 {
-                resolve = resolve.on_press(Message::ResolveConflict);
-            }
-            files = files
-                .push(text(format!("Reviewed: {}", review.change.path.display())))
-                .push(resolve);
-        }
-        let mut open = button(if self.loading {
-            "Loading…"
-        } else {
-            "Open / Refresh"
-        });
-        if !self.loading {
-            open = open.on_press(Message::Open);
-        }
-        let mut commit = button(
-            if self
-                .snapshot
-                .as_ref()
-                .is_some_and(|s| s.commit_basis.merge_heads.is_some())
-            {
-                "Complete merge commit"
-            } else {
-                "Commit all staged changes"
-            },
-        );
-        if !self.loading
-            && !self.summary.trim().is_empty()
-            && self.snapshot.as_ref().is_some_and(|s| {
-                s.commit_basis.rebase.is_none()
-                    && (s.changes.iter().any(FileChange::can_unstage)
-                        || s.commit_basis.merge_heads.is_some())
-                    && !s.changes.iter().any(FileChange::is_conflicted)
-            })
-        {
-            commit = commit.on_press(Message::Commit);
-        }
-        let mut branch_controls = column![text("Open a repository to manage branches")].spacing(8);
-        if let Some(snapshot) = &self.snapshot {
-            let merging = snapshot.commit_basis.merge_heads.is_some();
-            let rebasing = snapshot.commit_basis.rebase.is_some();
-            let current = if let Some(state) = &snapshot.commit_basis.rebase {
-                let branch = state.branch.to_string_lossy();
-                format!(
-                    "Rebasing branch: {}",
-                    branch.strip_prefix("refs/heads/").unwrap_or(&branch)
-                )
-            } else if let Some(branch) = &snapshot.commit_basis.branch {
-                let branch = branch.to_string_lossy();
-                format!(
-                    "Current branch: {}",
-                    branch.strip_prefix("refs/heads/").unwrap_or(&branch)
-                )
-            } else {
-                String::from("Detached HEAD — create or switch to a branch to continue")
-            };
-            let mut switch = button("Switch branch");
-            if !self.loading
-                && !merging
-                && !rebasing
-                && self
-                    .target_branch
-                    .as_ref()
-                    .is_some_and(|branch| !branch.is_current)
-            {
-                switch = switch.on_press(Message::SwitchBranch);
-            }
-            let mut preview = button("Preview merge");
-            let mut merge = button("Merge reviewed branch");
-            if !self.loading && !merging && !rebasing {
-                if self
-                    .target_branch
-                    .as_ref()
-                    .is_some_and(|branch| !branch.is_current)
-                {
-                    preview = preview.on_press(Message::PreviewMerge);
-                }
-                if self
-                    .merge_preview
-                    .as_ref()
-                    .is_some_and(|p| p.kind != MergeKind::AlreadyUpToDate)
-                {
-                    merge = merge.on_press(Message::MergeBranch);
-                }
-            }
-            let mut preview_rebase = button("Preview rebase");
-            let mut rebase = button("Rebase reviewed commits");
-            if !self.loading && !merging && !rebasing {
-                if self
-                    .target_branch
-                    .as_ref()
-                    .is_some_and(|branch| !branch.is_current)
-                {
-                    preview_rebase = preview_rebase.on_press(Message::PreviewRebase);
-                }
-                if self
-                    .rebase_preview
-                    .as_ref()
-                    .is_some_and(|p| p.kind != RebaseKind::AlreadyUpToDate)
-                {
-                    rebase = rebase.on_press(Message::RebaseBranch);
-                }
-            }
-            let mut create = button("Create and switch");
-            if !self.loading && !merging && !rebasing && !self.new_branch.is_empty() {
-                create = create.on_press(Message::CreateBranch);
-            }
-            branch_controls = column![
-                text(current),
-                row![
-                    pick_list(
-                        snapshot.branches.as_slice(),
-                        self.target_branch.as_ref(),
-                        Message::BranchSelected
-                    )
-                    .placeholder("Select a local branch"),
-                    switch,
-                ]
-                .spacing(8),
-                row![preview, merge, preview_rebase, rebase].spacing(8),
-                row![
-                    text_input("New branch name", &self.new_branch)
-                        .on_input(Message::BranchNameChanged),
-                    create
-                ]
-                .spacing(8),
-            ]
-            .spacing(8);
-            if merging {
-                let mut abort = button("Abort merge…");
-                if !self.loading {
-                    abort = abort.on_press(Message::RequestAbortMerge);
-                }
-                branch_controls = branch_controls
-                    .push(text(
-                        "Merge in progress: resolve conflicts and complete the merge commit.",
-                    ))
-                    .push(abort);
-                if self.abort_merge_pending {
-                    let mut confirm = button("Discard merge result and abort");
-                    if !self.loading {
-                        confirm = confirm.on_press(Message::AbortMerge);
-                    }
-                    branch_controls = branch_controls.push(text("Abort discards merge results and resolution edits. Saved stash entries are kept."))
-                        .push(row![confirm, button("Cancel").on_press(Message::CancelAbortMerge)].spacing(8));
-                }
-            }
-        }
-        if let Some(snapshot) = &self.snapshot {
-            if let Some(state) = &snapshot.commit_basis.rebase {
-                branch_controls = branch_controls.push(text(format!(
-                    "Rebase in progress: {} — step {}/{}",
-                    state.branch.to_string_lossy(),
-                    state.step,
-                    state.total
-                )));
-                if state.supported {
-                    let mut next = button("Continue rebase");
-                    let mut abort = button("Abort rebase…");
-                    if !self.loading {
-                        if !snapshot.changes.iter().any(FileChange::is_conflicted) {
-                            next = next.on_press(Message::ContinueRebase);
-                        }
-                        abort = abort.on_press(Message::RequestAbortRebase);
-                    }
-                    branch_controls = branch_controls.push(row![next, abort].spacing(8));
-                    if self.abort_rebase_pending {
-                        let mut confirm = button("Discard rebase result and abort");
-                        if !self.loading {
-                            confirm = confirm.on_press(Message::AbortRebase);
-                        }
-                        branch_controls = branch_controls.push(text("Abort returns to the original branch and discards resolution edits."))
-                            .push(row![confirm, button("Cancel").on_press(Message::CancelAbortRebase)].spacing(8));
-                    }
-                } else {
-                    branch_controls = branch_controls.push(text(
-                        "Use Git to continue or abort this unsupported rebase.",
-                    ));
-                }
-            }
-        }
-        let mut remote_controls = column![].spacing(8);
-        if let Some(snapshot) = &self.snapshot {
-            let mut fetch = button("Fetch");
-            let mut pull = button("Pull (fast-forward)");
-            let mut push = button("Push branch");
-            if !self.loading {
-                if let Some(remote) = &self.selected_remote {
-                    fetch = fetch.on_press(Message::RemoteAction(RemoteAction::Fetch));
-                    if remote.target_branch.is_some() {
-                        pull = pull.on_press(Message::RemoteAction(RemoteAction::Pull));
-                        push = push.on_press(Message::RemoteAction(RemoteAction::Push));
-                    }
-                }
-            }
-            let target = self.selected_remote.as_ref().and_then(|r| r.target_branch.as_ref())
-                .map(|target| format!("Remote branch: {}", target.to_string_lossy()))
-                .unwrap_or_else(|| String::from("Select a remote; pull/push require a committed local branch on its tracked remote"));
-            remote_controls = column![
-                row![
-                    pick_list(
-                        snapshot.remotes.as_slice(),
-                        self.selected_remote.as_ref(),
-                        Message::RemoteSelected
-                    )
-                    .placeholder("Select a remote"),
-                    fetch,
-                    pull,
-                    push
-                ]
-                .spacing(8),
-                text(target),
-                self.remote_settings_view(),
-            ]
-            .spacing(6);
-        }
-        let mut clone = button("Clone");
-        if !self.loading
-            && !self.clone_source.trim().is_empty()
-            && !self.clone_destination.trim().is_empty()
-        {
-            clone = clone.on_press(Message::Clone);
-        }
-        let mut transfer_controls = column![].spacing(6);
-        if self.transfer.is_some() || !self.transfer_progress.is_empty() {
-            transfer_controls = transfer_controls.push(
-                scrollable(text(&self.transfer_progress).font(iced::Font::MONOSPACE))
-                    .height(Length::Fixed(90.0)),
-            );
-            if self.transfer.is_some() {
-                transfer_controls = transfer_controls
-                    .push(button("Cancel transfer").on_press(Message::CancelTransfer));
-            }
-        }
-        let mut initialize = button("Create repository");
-        if !self.loading && !self.init_destination.trim().is_empty() {
-            initialize = initialize.on_press(Message::Initialize);
-        }
-        column![
-            text("Desktop Rust — development preview").size(24),
-            row![
-                text_input("New or existing project folder", &self.init_destination)
-                    .on_input(Message::InitDestinationChanged),
-                text_input("Initial branch (default: main)", &self.init_branch)
-                    .on_input(Message::InitBranchChanged),
-                initialize
-            ]
-            .spacing(8),
-            row![
-                text_input("Clone URL or local source", &self.clone_source)
-                    .on_input(Message::CloneSourceChanged),
-                text_input("New destination folder", &self.clone_destination)
-                    .on_input(Message::CloneDestinationChanged),
-                clone,
-            ]
-            .spacing(8),
-            row![
-                text_input("Local repository path", &self.path).on_input(Message::PathChanged),
-                open
-            ]
-            .spacing(12),
-            branch_controls,
-            remote_controls,
-            self.stash_view(),
-            row![
-                scrollable(files).width(Length::FillPortion(1)),
-                scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
-                    .width(Length::FillPortion(3))
-            ]
-            .spacing(16)
-            .height(Length::Fill),
-            text_input("Commit summary", &self.summary).on_input(Message::SummaryChanged),
-            text_input("Description (optional)", &self.description)
-                .on_input(Message::DescriptionChanged),
-            commit,
-            scrollable(text(&self.notice)).height(Length::Fixed(64.0)),
-            transfer_controls,
-        ]
-        .spacing(12)
-        .padding(24)
-        .into()
-    }
 }
 
-fn main() -> iced::Result {
-    iced::application("Desktop Rust", Desktop::update, Desktop::view).run()
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(start) = capture::Start::parse(std::env::args_os().skip(1))? else {
+        return Ok(());
+    };
+    let size = start.size;
+    let capturing = start.capture.is_some();
+    let app = start.initialize()?;
+    let success = app.capture_success.clone();
+    iced::application("Desktop Rust", Desktop::update, Desktop::view)
+        .window(iced::window::Settings {
+            size,
+            min_size: Some(iced::Size::new(960.0, 640.0)),
+            ..Default::default()
+        })
+        .subscription(|app: &Desktop| {
+            if app.capture.is_some() && !app.loading && app.capture_frames < 4 {
+                iced::window::frames().map(|_| Message::CaptureFrame)
+            } else {
+                iced::Subscription::none()
+            }
+        })
+        .run_with(|| (app, Task::none()))?;
+    if capturing && !success.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("Window closed before a successful capture".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1438,6 +1426,7 @@ mod tests {
                     path: "/old".into(),
                 },
                 history: String::new(),
+                commits: Vec::new(),
                 status: String::new(),
                 changes: Vec::new(),
                 branches: Vec::new(),
@@ -1546,6 +1535,9 @@ mod tests {
         let mut app = loaded();
         app.loading = true;
         let _ = app.update(Message::BranchNameChanged(String::from("new")));
+        let _ = app.update(Message::RenameBranchNameChanged(String::from("renamed")));
+        let _ = app.update(Message::RenameCurrentBranch);
+        assert!(app.rename_branch.is_empty());
         let _ = app.update(Message::BranchSelected(target()));
         let _ = app.update(Message::CreateBranch);
         let _ = app.update(Message::SwitchBranch);
@@ -1559,8 +1551,11 @@ mod tests {
     fn path_edit_clears_branch_selection_and_prevents_branch_writes() {
         let mut app = loaded();
         app.new_branch = String::from("feature");
+        app.rename_branch = String::from("renamed");
         app.target_branch = Some(target());
         let _ = app.update(Message::PathChanged(String::from("/new")));
+        let _ = app.update(Message::RenameCurrentBranch);
+        assert!(app.rename_branch.is_empty());
         let _ = app.update(Message::CreateBranch);
         let _ = app.update(Message::SwitchBranch);
         assert!(app.new_branch.is_empty());
@@ -2363,5 +2358,357 @@ mod tests {
         assert!(app.notice.is_empty());
         assert!(!app.abort_rebase_pending);
         assert!(app.rebase_preview.is_some());
+    }
+    fn history_commit(number: usize) -> CommitSummary {
+        CommitSummary {
+            oid: format!("{number:040x}"),
+            subject: format!("Commit {number}"),
+            author: "Test Author".into(),
+            authored_at: "2026-11-24T12:00:00+01:00".into(),
+        }
+    }
+
+    fn history_app() -> Desktop {
+        let mut app = loaded();
+        let snapshot = app.snapshot.as_mut().unwrap();
+        snapshot.commits = vec![history_commit(1)];
+        snapshot.commit_basis.head = Some(format!("{}\n", snapshot.commits[0].oid));
+        let snapshot = snapshot.clone();
+        app.reset_history(&snapshot);
+        let _ = app.update(Message::ShowHistory(true));
+        app
+    }
+
+    #[test]
+    fn history_navigation_preserves_drafts_and_invalidates_hidden_write_previews() {
+        let mut app = history_app();
+        app.merge_preview = Some(preview(MergeKind::CleanMerge));
+        let _ = app.update(Message::ShowHistory(true));
+        assert!(app.merge_preview.is_none());
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+        let _ = app.update(Message::ShowHistory(false));
+        assert!(!app.show_history);
+        assert_eq!(app.summary, "Summary");
+    }
+
+    #[test]
+    fn history_refresh_reanchors_the_list_and_invalidates_selected_commit() {
+        let mut app = history_app();
+        app.commit_details = Some(CommitDetails {
+            commit: history_commit(1),
+            parents: Vec::new(),
+            message: "body".into(),
+            files: Vec::new(),
+        });
+        let mut snapshot = app.snapshot.clone().unwrap();
+        snapshot.commits = vec![history_commit(2)];
+        snapshot.commit_basis.head = Some(history_commit(2).oid);
+        let _ = app.update(Message::Refreshed(Ok(snapshot)));
+        assert_eq!(app.history_commits, vec![history_commit(2)]);
+        assert_eq!(app.history_head, Some(history_commit(2).oid));
+        assert!(app.commit_details.is_none());
+        assert!(!app.history_has_more);
+    }
+
+    #[test]
+    fn older_page_appends_without_moving_the_anchor() {
+        let mut app = history_app();
+        app.history_commits = (0..100).map(history_commit).collect();
+        app.history_has_more = true;
+        let anchor = app.history_head.clone();
+        let _ = app.update(Message::OlderCommitsLoaded(Ok(vec![
+            history_commit(100),
+            history_commit(101),
+        ])));
+        assert_eq!(app.history_commits.len(), 102);
+        assert_eq!(app.history_head, anchor);
+        assert!(!app.history_has_more);
+    }
+
+    #[test]
+    fn failed_older_page_preserves_entries_and_allows_retry() {
+        let mut app = history_app();
+        app.history_has_more = true;
+        let before = app.history_commits.clone();
+        let _ = app.update(Message::OlderCommitsLoaded(Err(String::from(
+            "object unavailable",
+        ))));
+        assert_eq!(app.history_commits, before);
+        assert!(app.history_has_more);
+        assert!(app.notice.contains("object unavailable"));
+    }
+
+    #[test]
+    fn repository_change_clears_history_cursor_and_prevents_stale_selection() {
+        let mut app = history_app();
+        let _ = app.update(Message::PathChanged("/new".into()));
+        let _ = app.update(Message::SelectCommit(history_commit(1)));
+        assert!(app.history_commits.is_empty());
+        assert!(app.history_head.is_none());
+        assert!(app.commit_details.is_none());
+        assert!(!app.show_history);
+        assert!(!app.loading);
+    }
+
+    #[test]
+    fn busy_operation_ignores_history_navigation_and_selection() {
+        let mut app = loaded();
+        app.loading = true;
+        let _ = app.update(Message::ShowHistory(true));
+        let _ = app.update(Message::SelectCommit(history_commit(1)));
+        assert!(!app.show_history);
+        assert!(app.detail.is_empty());
+        assert!(app.loading);
+    }
+
+    #[test]
+    fn failed_commit_load_clears_old_files_without_discarding_the_history() {
+        let mut app = history_app();
+        let before = app.history_commits.clone();
+        app.commit_details = Some(CommitDetails {
+            commit: history_commit(1),
+            parents: Vec::new(),
+            message: "old".into(),
+            files: Vec::new(),
+        });
+        let _ = app.update(Message::CommitLoaded(Err(String::from(
+            "object unavailable",
+        ))));
+        assert!(app.commit_details.is_none());
+        assert_eq!(app.history_commits, before);
+        assert!(app.detail.contains("object unavailable"));
+    }
+    #[test]
+    fn panel_navigation_preserves_drafts_and_revokes_hidden_confirmations() {
+        let mut app = loaded();
+        app.merge_preview = Some(preview(MergeKind::CleanMerge));
+        app.rebase_preview = Some(reviewed_rebase());
+        app.remote_remove_pending = true;
+        app.abort_merge_pending = true;
+        app.abort_rebase_pending = true;
+        app.show_history = true;
+        let _ = app.update(Message::PanelSelected(Panel::Remotes));
+        assert!(!app.show_history);
+        assert_eq!(app.panel, Panel::Remotes);
+        assert!(app.show_remote_settings);
+        assert!(app.merge_preview.is_none());
+        assert!(app.rebase_preview.is_none());
+        assert!(!app.remote_remove_pending);
+        assert!(!app.abort_merge_pending);
+        assert!(!app.abort_rebase_pending);
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+    }
+
+    #[test]
+    fn busy_operation_keeps_the_current_panel() {
+        let mut app = loaded();
+        app.loading = true;
+        let _ = app.update(Message::PanelSelected(Panel::Repository));
+        assert_eq!(app.panel, Panel::Changes);
+    }
+
+    #[test]
+    fn conflicted_operation_returns_to_changes_without_discarding_drafts() {
+        let mut app = loaded();
+        app.panel = Panel::Branches;
+        app.show_history = true;
+        let _ = app.update(Message::Wrote(
+            Operation::Rebase,
+            Err("Resolve conflicts".into()),
+        ));
+        assert_eq!(app.panel, Panel::Changes);
+        assert!(!app.show_history);
+        assert_eq!(app.summary, "Summary");
+        assert!(app.notice.contains("Resolve conflicts"));
+    }
+    #[test]
+    fn refresh_preserves_history_panel_and_drafts() {
+        let mut app = history_app();
+        let _ = app.update(Message::Open);
+        assert_eq!(app.panel, Panel::History);
+        assert!(app.show_history);
+        assert!(app.loading);
+        assert_eq!(app.summary, "Summary");
+    }
+    #[test]
+    fn failed_rename_preserves_drafts_and_refreshes_on_the_branches_panel() {
+        let mut app = loaded();
+        app.panel = Panel::Branches;
+        app.rename_branch = "renamed".into();
+        app.new_branch = "creation draft".into();
+        let _ = app.update(Message::Wrote(
+            Operation::RenameBranch,
+            Err("Destination exists".into()),
+        ));
+        assert!(app.loading);
+        assert_eq!(app.panel, Panel::Branches);
+        assert_eq!(app.rename_branch, "renamed");
+        assert_eq!(app.new_branch, "creation draft");
+        assert_eq!(app.summary, "Summary");
+        assert!(app.notice.contains("Destination exists"));
+    }
+
+    #[test]
+    fn successful_rename_clears_only_its_draft_and_old_write_previews() {
+        let mut app = loaded();
+        app.panel = Panel::Branches;
+        app.rename_branch = "renamed".into();
+        app.new_branch = "creation draft".into();
+        app.target_branch = Some(target());
+        app.merge_preview = Some(preview(MergeKind::CleanMerge));
+        app.rebase_preview = Some(reviewed_rebase());
+        let _ = app.update(Message::Wrote(
+            Operation::RenameBranch,
+            Ok("Renamed".into()),
+        ));
+        assert!(app.rename_branch.is_empty());
+        assert_eq!(app.new_branch, "creation draft");
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+        assert_eq!(app.panel, Panel::Branches);
+        assert!(app.merge_preview.is_none());
+        assert!(app.rebase_preview.is_none());
+        assert!(app.target_branch.is_none());
+    }
+
+    #[test]
+    fn unborn_detached_and_active_operations_cannot_start_a_rename() {
+        for state in ["unborn", "detached", "merge", "rebase"] {
+            let mut app = if state == "rebase" {
+                pending_rebase()
+            } else {
+                loaded()
+            };
+            let basis = &mut app.snapshot.as_mut().unwrap().commit_basis;
+            if state != "unborn" {
+                basis.head = Some(format!("{:040}", 1));
+            }
+            if state != "detached" {
+                basis.branch = Some("refs/heads/main".into());
+            }
+            if state == "merge" {
+                basis.merge_heads = Some(b"parent\n".to_vec());
+            }
+            app.rename_branch = "renamed".into();
+            let _ = app.update(Message::RenameCurrentBranch);
+            assert!(!app.loading, "{state}");
+            assert_eq!(app.rename_branch, "renamed");
+            assert!(app.notice.contains("committed local branch"));
+        }
+    }
+    fn delete_app() -> Desktop {
+        let mut app = loaded();
+        app.panel = Panel::Branches;
+        let snapshot = app.snapshot.as_mut().unwrap();
+        snapshot.commit_basis.branch = Some("refs/heads/main".into());
+        snapshot.commit_basis.head = Some("a".repeat(40));
+        snapshot.branches.push(target());
+        app.target_branch = Some(target());
+        app
+    }
+
+    #[test]
+    fn deletion_requires_a_current_confirmation_and_cancel_revokes_it() {
+        let mut app = delete_app();
+        let _ = app.update(Message::DeleteBranch);
+        assert!(!app.loading);
+        let _ = app.update(Message::RequestDeleteBranch);
+        assert_eq!(app.delete_branch_pending, Some(target()));
+        let _ = app.update(Message::CancelDeleteBranch);
+        let _ = app.update(Message::DeleteBranch);
+        assert!(!app.loading);
+        let _ = app.update(Message::RequestDeleteBranch);
+        let _ = app.update(Message::DeleteBranch);
+        assert!(app.loading);
+        assert!(app.delete_branch_pending.is_none());
+    }
+
+    #[test]
+    fn selection_navigation_and_refresh_revoke_branch_deletion_confirmation() {
+        for change in ["selection", "panel", "refresh", "path"] {
+            let mut app = delete_app();
+            let _ = app.update(Message::RequestDeleteBranch);
+            match change {
+                "selection" => {
+                    let _ = app.update(Message::BranchSelected(target()));
+                }
+                "panel" => {
+                    let _ = app.update(Message::PanelSelected(Panel::Remotes));
+                }
+                "refresh" => {
+                    let snapshot = app.snapshot.clone().unwrap();
+                    let _ = app.update(Message::Refreshed(Ok(snapshot)));
+                }
+                _ => {
+                    let _ = app.update(Message::PathChanged("/new".into()));
+                }
+            }
+            assert!(app.delete_branch_pending.is_none(), "{change}");
+            let _ = app.update(Message::DeleteBranch);
+            assert!(!app.loading);
+        }
+    }
+
+    #[test]
+    fn busy_ui_cannot_confirm_or_repeat_branch_deletion() {
+        let mut app = delete_app();
+        app.loading = true;
+        let _ = app.update(Message::RequestDeleteBranch);
+        let _ = app.update(Message::DeleteBranch);
+        assert!(app.delete_branch_pending.is_none());
+        assert!(app.notice.is_empty());
+    }
+
+    #[test]
+    fn changed_selection_cannot_reuse_a_reviewed_branch_even_without_navigation() {
+        let mut app = delete_app();
+        let _ = app.update(Message::RequestDeleteBranch);
+        app.target_branch.as_mut().unwrap().oid = "b".repeat(40);
+        let _ = app.update(Message::DeleteBranch);
+        assert!(!app.loading);
+        assert!(app.delete_branch_pending.is_none());
+    }
+
+    #[test]
+    fn deletion_failure_refreshes_without_clearing_other_drafts_or_reusing_confirmation() {
+        let mut app = delete_app();
+        app.new_branch = "create draft".into();
+        app.rename_branch = "rename draft".into();
+        let _ = app.update(Message::RequestDeleteBranch);
+        let _ = app.update(Message::Wrote(
+            Operation::DeleteBranch,
+            Err("Not merged".into()),
+        ));
+        assert!(app.loading);
+        assert_eq!(app.panel, Panel::Branches);
+        assert!(app.delete_branch_pending.is_none());
+        assert!(app.target_branch.is_none());
+        assert_eq!(app.new_branch, "create draft");
+        assert_eq!(app.rename_branch, "rename draft");
+        assert_eq!(app.summary, "Summary");
+        assert!(app.notice.contains("Not merged"));
+    }
+
+    #[test]
+    fn current_unborn_detached_and_active_branch_states_cannot_request_deletion() {
+        for state in ["current", "unborn", "detached", "merge", "rebase"] {
+            let mut app = delete_app();
+            match state {
+                "current" => app.target_branch.as_mut().unwrap().is_current = true,
+                "unborn" => app.snapshot.as_mut().unwrap().commit_basis.head = None,
+                "detached" => app.snapshot.as_mut().unwrap().commit_basis.branch = None,
+                "merge" => {
+                    app.snapshot.as_mut().unwrap().commit_basis.merge_heads = Some(Vec::new())
+                }
+                _ => {
+                    app.snapshot.as_mut().unwrap().commit_basis.rebase =
+                        pending_rebase().snapshot.unwrap().commit_basis.rebase;
+                }
+            }
+            let _ = app.update(Message::RequestDeleteBranch);
+            assert!(app.delete_branch_pending.is_none(), "{state}");
+        }
     }
 }

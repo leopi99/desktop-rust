@@ -2,7 +2,9 @@
 mod branches;
 mod conflicts;
 pub use conflicts::{inspect_conflict, resolve_conflict};
+mod history;
 mod init;
+pub use history::{commit_details, commit_file_diff, commit_history};
 mod merge;
 pub use init::init_repository;
 pub use merge::{abort_merge, execute_merge, preview_merge};
@@ -12,7 +14,7 @@ pub use rebase::{abort_rebase, continue_rebase, execute_rebase, preview_rebase};
 mod stash;
 pub use stash::{apply_stash, save_stash};
 mod transfer;
-pub use branches::{create_branch, switch_branch};
+pub use branches::{create_branch, delete_local_branch, rename_current_branch, switch_branch};
 use desktop_core::{CommitBasis, FileChange, FileDiff, Repository, RepositorySnapshot};
 pub use remotes::{
     add_remote, clone_repository, clone_repository_with_control, remote_operation,
@@ -120,14 +122,22 @@ pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
     // Git terminates this path with one newline; filenames may themselves contain newlines.
     let root = file_path(root.strip_suffix(b"\n").unwrap_or(&root))?;
     let status = read(&root, &["status", "--short", "--branch"])?;
-    let has_head = read(&root, &["rev-parse", "--verify", "HEAD"]).is_ok();
-    let history = if has_head {
-        read(&root, &["log", "-30", "--format=%h %s", "--"])?
+    let commit_basis = commit_basis(&root)?;
+    let commits = if let Some(head) = &commit_basis.head {
+        history::commit_history(&root, head.trim(), 0)?
     } else {
+        Vec::new()
+    };
+    let history = if commit_basis.head.is_none() {
         String::from("No commits yet")
+    } else {
+        commits
+            .iter()
+            .map(|commit| format!("{} {}", &commit.oid[..7], commit.subject))
+            .collect::<Vec<_>>()
+            .join("\n")
     };
     let changes = changes(&root)?;
-    let commit_basis = commit_basis(&root)?;
     let branches = branches::list(&root)?;
     let remotes = remotes::list(&root)?;
     let stashes = stash::list(&root)?;
@@ -144,6 +154,7 @@ pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
         repository: Repository { path: root },
         status,
         history,
+        commits,
         changes,
         branches,
         remotes,

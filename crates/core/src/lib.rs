@@ -11,6 +11,7 @@ pub struct RepositorySnapshot {
     pub repository: Repository,
     pub status: String,
     pub history: String,
+    pub commits: Vec<CommitSummary>,
     pub changes: Vec<FileChange>,
     pub branches: Vec<LocalBranch>,
     pub remotes: Vec<Remote>,
@@ -205,4 +206,29 @@ pub struct RebaseState {
     pub supported: bool,
     pub commits: Vec<String>,
     pub metadata: Vec<(String, Vec<u8>)>,
+}
+
+/// Read-only commit metadata, addressed by full object ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitSummary {
+    pub oid: String,
+    pub subject: String,
+    pub author: String,
+    pub authored_at: String,
+}
+
+/// One committed path change relative to the first parent (or the empty root).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitFile {
+    pub path: PathBuf,
+    pub original_path: Option<PathBuf>,
+    pub status: char,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitDetails {
+    pub commit: CommitSummary,
+    pub parents: Vec<String>,
+    pub message: String,
+    pub files: Vec<CommitFile>,
 }

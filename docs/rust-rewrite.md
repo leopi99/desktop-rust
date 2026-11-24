@@ -34,6 +34,96 @@ automatic stash or remote branch guessing is used. Before the first commit,
 create-and-switch sets the initial branch name; no branch ref exists until commit.
 Commit drafts survive branch changes; a failed creation also retains the branch name.
 
+## Rename the current branch
+
+In Branches, enter a new name in New name for the current branch and choose
+Rename current branch. This renames only the observed, committed local branch;
+Git moves its reflog and local branch configuration. The commit ID, staged and
+unstaged changes and untracked files are preserved. Tracking keeps its existing
+remote destination: the remote branch is not renamed or deleted, and no network
+request is made. Refresh then shows the new name and updated branch list.
+
+The action rejects detached/unborn HEAD, active merge/rebase/cherry-pick/revert
+operations, changed index/HEAD/branch observations, occupied or invalid names,
+and destinations with an existing local branch configuration section. A branch
+also checked out in another worktree is rejected; renaming a branch used only by
+the current linked worktree is supported. Git uses its mandatory ref locks, with
+no forced overwrite. Preflight checks do not fence concurrent external clients;
+if Git fails after changing a ref, refresh shows the actual resulting state.
+
+The rename field is separate from branch creation. Failures retain it, successful
+renames clear only that field, and changing repositories clears it. Commit and
+branch-creation drafts survive the rename. Integration tests cover tracking,
+reflog, index/file preservation, stale observations, destination collisions,
+sequencer state, linked worktrees and native non-UTF-8 source names on Unix.
+
+This is a prototype under the existing `branches` feature in the upstream ledger.
+Renaming a different selected branch and case-only renames requiring a forced
+retry remain planned. Safe deletion of merged local branches is described below. The reference implementation in
+`app/src/lib/git/branch.ts` supports a wider scope; this increment does not claim
+complete branch parity or advance release checkpoints. The input accepts a UTF-8
+new name, while an existing source name retains its native filesystem encoding.
+The updated resting Branches panel has been captured and visually inspected on
+Linux with the software renderer at 960×640 and 1200×800. Interactive keyboard
+and end-to-end UI rename checks remain outstanding.
+
+## Delete a merged local branch
+
+In Branches, select a non-current local branch, then Delete selected branch.
+Review its name and full commit ID and confirm Delete reviewed local branch.
+This removes the local ref, reflog and local branch settings. It does not contact
+a server or delete remote branches or remote-tracking refs. Current HEAD,
+commit drafts, staged/unstaged changes and untracked files are preserved.
+
+The selected tip must be an ancestor of the observed current HEAD. Merely being
+published to its upstream is insufficient. The operation uses `git branch --delete`
+without force, so Git may also refuse when the branch has commits missing from
+its configured upstream even if the current branch contains them. There is no
+force-delete fallback. Branches checked out in linked worktrees are rejected by Git.
+
+Deletion requires a committed local current branch, an unchanged index/HEAD/branch
+observation, and the same selected branch name and object ID. Active merge,
+rebase, cherry-pick and revert operations block it. Selection changes, panel or
+repository navigation, refresh and write completion revoke the confirmation.
+Failures refresh the actual repository state and require a new review; unrelated
+creation, rename and commit drafts are retained.
+
+Preflight checks and the process mutex do not lock out external Git clients.
+Another client can still race after the checks and before Git acquires its ref
+locks. This feature does not claim atomic compare-and-delete against the reviewed
+object ID or protection against concurrent external config changes. The original
+TypeScript adapter supports forced deletion; that scope remains deferred under
+the existing `branches` feature. Release analysis/parity checkpoints are unchanged.
+
+Git integration tests cover merged/unmerged history, tracked upstream checks,
+stale observations, worktrees, operation metadata, dirty-file preservation and
+non-UTF-8 target names. UI tests cover confirmation binding, cancellation, busy
+controls, invalidation and failure handling. The smoke fixture also captures a
+read-only deletion review using `--panel branch-delete-review`; this developer
+scenario requires `--repository` and `--capture`, selects the first non-current
+branch and never sends the deletion action. The updated resting panel and
+confirmation have been captured and visually inspected on Linux using the
+software renderer at 960×640 and 1200×800. Interactive keyboard and complete
+end-to-end UI deletion checks remain outstanding.
+
+## Commit history
+
+Switch between Changes and History to inspect commits without checking them out.
+History lists 100 commits per page, with Load older commits anchored to the observed
+HEAD object ID. Moving HEAD outside the app does not shift an in-progress page;
+Open / Refresh reloads the list from the new tip. Selecting a commit shows its full
+ID, author, authored date, message and changed files. Selecting a file shows its
+committed diff, independent of current staged/working-tree edits.
+
+Root commits are compared with an empty tree; merge commits use their first parent.
+Renames retain both paths, including non-UTF-8 paths on Unix. External diff and
+textconv helpers are disabled. Commit message previews are limited to 64 KiB and
+committed diff previews to 256 KiB. These are display limits; Git output is currently
+read into memory before preview truncation. Large-repository virtualization and
+streamed historical diffs remain planned. Commit controls are hidden in History;
+switch to Changes to prepare a new commit. Resting layouts have been visually
+checked; interactive history navigation QA remains outstanding.
+
 ## Development checks
 
 The Rust app uses Cargo. The inherited source is also checked with the repository's
@@ -82,7 +172,7 @@ Only plain pick sequences on the merge backend are supported for continuation.
 Apply-backend rebases, custom todo commands, automatic stash and automatic other-ref
 updates must be managed with Git. Interactive editing, skip and rebase-merges remain
 planned. Preflight checks do not fence concurrent external clients or filesystem
-changes. UI state is tested; visual QA remains outstanding.
+changes. UI state is tested; interactive rebase and conflict UI QA remains outstanding.
 
 ## Merge local branches
 
@@ -111,7 +201,7 @@ is not an undo for a completed fast-forward or merge commit.
 
 Unrelated histories and detached/unborn HEAD are rejected. Previews are not a
 transaction against external Git clients or filesystem changes. Interactive rebase,
-squash merge and cherry-pick workflows remain planned; visual UI QA is outstanding.
+squash merge and cherry-pick workflows remain planned; interactive merge UI QA is outstanding.
 
 ## Review and mark conflicts resolved
 
@@ -148,8 +238,8 @@ files. Ignored-file and symlink-directory collisions are checked before restore.
 Existing work, stale index/HEAD or removed stash entries stop restore. If Git reports
 conflicts, the app refreshes status and retains the stash. Edit conflicted text
 files, review them in the app and mark them resolved before committing the result.
-Automatic conflict editing, stash deletion and pop are not implemented yet. The current UI tests verify state transitions; visual
-QA remains outstanding. Stash operations share the process write lock with other
+Automatic conflict editing, stash deletion and pop are not implemented yet. UI tests verify state transitions; the resting Saved changes panel has been visually checked,
+but interactive save/restore QA remains outstanding. Stash operations share the process write lock with other
 local writes and do not fence concurrent external edits.
 
 ## Create a local repository
@@ -170,7 +260,7 @@ Concurrent external filesystem changes are not a transaction with this preflight
 Git commands ignore inherited repository-routing variables such as `GIT_DIR`,
 `GIT_WORK_TREE` and `GIT_INDEX_FILE`, while keeping normal identity, helper and SSH
 configuration. Initialization is tested end-to-end through the first staged commit;
-visual UI QA remains outstanding.
+the resting Create / Clone panel has been visually checked, but interactive UI QA remains outstanding.
 
 ## Clone and remotes
 
@@ -223,8 +313,55 @@ may have fetched refs, and a clone may leave partial files. The app refreshes th
 repository after interrupted remote actions and does not delete partial clones or
 Git lockfiles. Fetch again to verify remote state before retrying an interrupted push.
 Remote operations run only on explicit actions. Tests use local bare repositories; live
-GitHub authentication and UI visual QA have not been performed.
+GitHub authentication and interactive transfer UI QA have not been performed.
+The resting Remotes and Create / Clone layouts have been visually checked.
 No credentials or original application databases are imported.
+
+## UI layout and visual checks
+
+The sidebar separates Changes, History, Branches, Remotes, Saved changes and
+Create / Clone. File lists and diffs occupy the main workspace; commit fields
+appear only in Changes. A merge/rebase banner keeps operation controls reachable
+while resolving files. Navigation preserves drafts and revokes hidden previews
+and abort/remove confirmations. Busy operations keep their current panel.
+
+The default window is 1200×800 with a minimum of 960×640. A renderer layer clips
+sidebar content, including long paths with the software renderer. Views live in
+`crates/ui/src/layout.rs`; Git operations and their freshness checks are unchanged.
+
+Developer launch options accept a repository, panel and window size:
+
+```sh
+cargo run --locked -p desktop-rust -- --repository /path/to/repo --panel history
+cargo run --locked -p desktop-rust -- --repository /path/to/repo --size 960x640 --capture /tmp/fresh-window.png
+```
+
+`--capture` saves only this application's window as PNG and exits. It refuses
+existing output files and reports failure if the window closes before capture.
+Launch-time repository inspection is read-only and happens before window creation.
+Interactive repository operations continue to use worker threads.
+
+A repeatable offline fixture captures all six panels and a read-only branch
+deletion review without touching a real project or contacting a remote:
+
+```sh
+cargo build --locked -p desktop-rust
+python3 script/rust-ui-smoke.py --output /tmp/fresh-ui-1200 --size 1200x800
+python3 script/rust-ui-smoke.py --output /tmp/fresh-ui-960 --size 960x640
+```
+
+Each output directory must be new. The script requires a graphical session,
+uses the software renderer unless `ICED_BACKEND` is set, creates and removes a
+temporary repository, and checks that its working files, config, status, refs and
+index remain unchanged. PNGs and `report.json` are local review artifacts, not
+committed baselines. Compare the images manually: capture success alone does not
+establish visual correctness. Automated CI currently runs state tests, not captures.
+
+On 2026-11-24, all six basic panels were captured and visually inspected on Linux
+at 1200×800 and 960×640 using the software renderer. This covers the resting
+layouts with sample changes, history, remote configuration and a stash. Keyboard
+navigation, focus, IME, HiDPI, accessibility, other renderers/platforms, long-list
+scrolling and complete interactive write/conflict flows remain unverified.
 
 ## Stable upstream maintenance
 
@@ -284,7 +421,9 @@ if unattended availability is required.
 The preview now supports local initialization, stage/unstage, commit, and branch
 creation/switching.
 Clone, fetch, fast-forward pull, push and upstream setup are implemented as a
-prototype. Branch deletion/rename and in-app authentication remain planned.
+prototype. Renaming the current committed branch and deleting merged local
+branches with confirmation are supported. Renaming other
+selected branches, force deletion and in-app authentication remain planned.
 Diff rendering is plain monospaced text; syntax highlighting, hunk selection,
 large-diff virtualization and interactive conflict resolution remain planned.
 Automated Git integration tests cover staged/unstaged changes, unborn branches,
@@ -293,4 +432,5 @@ Git tests also cover branch creation/switching, detached and unborn HEAD, invali
 names, stale source/target refs, linked worktrees and preservation of dirty files.
 UI state tests cover draft retention, branch operation results, busy controls,
 write-target invalidation and failed refresh.
-The Iced UI compiles, but visual QA and accessibility testing remain outstanding.
+The six basic Iced panels have had Linux visual layout checks at two window sizes.
+Interactive workflow QA and accessibility testing remain outstanding; see the UI checks above.
