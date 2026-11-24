@@ -62,7 +62,7 @@ pub(super) fn ensure_idle(root: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn ancestor(root: &Path, first: &str, second: &str) -> io::Result<bool> {
+pub(super) fn ancestor(root: &Path, first: &str, second: &str) -> io::Result<bool> {
     let output = git_command(root)
         .args(["merge-base", "--is-ancestor", first, second])
         .output()?;

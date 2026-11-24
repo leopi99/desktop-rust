@@ -160,6 +160,19 @@ impl Desktop {
             {
                 rename = rename.on_press(Message::RenameCurrentBranch);
             }
+            let mut delete = button("Delete selected branch…").style(button::danger);
+            if !self.loading
+                && !merging
+                && !rebasing
+                && snapshot.commit_basis.branch.is_some()
+                && snapshot.commit_basis.head.is_some()
+                && self
+                    .target_branch
+                    .as_ref()
+                    .is_some_and(|branch| !branch.is_current)
+            {
+                delete = delete.on_press(Message::RequestDeleteBranch);
+            }
             branch_controls = column![
                 text(current),
                 row![
@@ -172,6 +185,7 @@ impl Desktop {
                     switch,
                 ]
                 .spacing(8),
+                delete,
                 row![preview, merge].spacing(8),
                 row![preview_rebase, rebase].spacing(8),
                 row![
@@ -189,6 +203,16 @@ impl Desktop {
                 text("Renaming is local. The remote branch keeps its existing name.").size(14),
             ]
             .spacing(8);
+            if let Some(branch) = &self.delete_branch_pending {
+                let mut confirm = button("Delete reviewed local branch").style(button::danger);
+                if !self.loading {
+                    confirm = confirm.on_press(Message::DeleteBranch);
+                }
+                branch_controls = branch_controls
+                    .push(text(format!("Delete local branch {} at {}?", branch.name.to_string_lossy(), branch.oid)))
+                    .push(text("Removes its local ref, reflog and branch settings. Only commits merged into the current branch can be deleted. Remote branches are kept."))
+                    .push(row![confirm, button("Cancel").on_press(Message::CancelDeleteBranch)].spacing(8));
+            }
             if merging {
                 let mut abort = button("Abort merge…");
                 if !self.loading {

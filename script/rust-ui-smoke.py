@@ -60,7 +60,7 @@ def main():
                     (repo / ".git/index").read_bytes(), (repo / ".git/config").read_bytes(), files)
 
         before = signature()
-        panels = ["changes", "history", "branches", "remotes", "stash", "repository"]
+        panels = ["changes", "history", "branches", "remotes", "stash", "repository", "branch-delete-review"]
         for panel in panels:
             subprocess.run(
                 [str(binary), "--repository", str(repo), "--panel", panel,
