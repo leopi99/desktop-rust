@@ -130,3 +130,6 @@ folder: [logos](app/static/logos).
 GitHub® and its stylized versions and the Invertocat mark are GitHub's
 Trademarks or registered Trademarks. When using GitHub's logos, be sure to
 follow the GitHub [logo guidelines](https://github.com/logos).
+
+Rust development: [status](docs/rust/status.md), [backlog](docs/rust/backlog.md),
+[quality rules](docs/rust/quality.md), and [upstream maintenance](docs/upstream-maintenance.md).

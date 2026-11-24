@@ -4,6 +4,13 @@ The fork targets full behavioral parity with stable GitHub Desktop releases,
 starting with Linux x86_64. Iced is the Rust UI; Git CLI remains the Git engine.
 The Electron sources are reference material, not the implementation to merge into Rust.
 
+## Project tracking and Rust rules
+
+Use [status](rust/status.md) for completed/prototype work,
+[the backlog](rust/backlog.md) for ordered remaining tasks and batch acceptance,
+and [the Rust quality standard](rust/quality.md) for required engineering checks.
+Rust-specific agent instructions are in [crates/AGENTS.md](../crates/AGENTS.md).
+
 ## Running
 
 Install a stable Rust toolchain and Git, then run `cargo run -p desktop-rust`.
@@ -156,9 +163,9 @@ Prettier and ESLint configuration. Install those tools from the existing lockfil
 npm ci --ignore-scripts --no-audit --no-fund
 npm run lint:fix
 npm run lint
-cargo fmt --all -- --check
-cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo test --locked --workspace
+python3 script/check_rust.py
+# With dependencies already cached:
+python3 script/check_rust.py --offline
 ```
 
 The `--ignore-scripts` install is sufficient for lint and avoids Electron downloads,
@@ -413,7 +420,8 @@ Changes for features not yet available remain deferred against that milestone.
 Advance `analyzed` only after classification; advance `parity` only after all
 applicable changes for supported features have passed verification.
 
-Port behaviors in separate PRs rather than merging TypeScript into Rust.
+Port behaviors as independently reviewable commits in coherent milestone batches,
+with one PR per batch. Keep the TypeScript reference source separate from Rust ports.
 Prioritize data loss, credential issues and security fixes outside the weekly cycle.
 Follow AGENTS.md and the prepare-team-pr skill for team-authored PR preparation.
 
