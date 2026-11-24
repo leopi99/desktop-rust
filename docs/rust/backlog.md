@@ -47,7 +47,7 @@ the batch PR; do not combine the entire backlog into one PR.
 
 | ID | Priority | Outcome and acceptance |
 | --- | --- | --- |
-| U-01 | High | Inventory the full initial 3.6.11 stable source, supported workflow contracts, original tests and dependencies. Record concrete differences/evidence per active feature before advancing analysis. Interval triage alone is insufficient. |
+| U-01 | High | Inventory the full initial 3.6.11 stable source, supported workflow contracts, original tests and dependencies. [The inventory](../upstream/baseline-3.6.11-inventory.md) now contains pinned initialization/default-branch and manual-conflict slices (five complete files plus selected config functions), with gaps G-04/G-05. The coverage grid remains open; interval triage and these partial slices do not advance analysis. |
 | U-02 | High | Observe actual weekly discovery and daily watchdog runs on the default branch; review and persist each proposed detection record with immutable source links. Owner reports Actions minutes exhausted until December 2026: use local weekly discovery meanwhile and verify scheduled execution after quota returns. Local discovery on 2026-11-24 at 16:32 UTC found no new stable releases. |
 | U-03 | High | Port classified active-feature differences with regression tests and source/Rust PR links. Advance parity only when ledger gates and substantive review are satisfied. |
 | U-04 | Medium | Decide whether discovery should publish a draft review proposal automatically; retain permission/ownership checks, atomic artifacts and separate analysis/parity gates. |
@@ -64,9 +64,11 @@ or API failures to produce a healthy report.
 | G-01 | High | Review and strengthen freshness/ref handling against concurrent external clients where feasible, preserving Git's own worktree/merge safeguards and the documented race boundary. |
 | UI-01 | High | Exercise real keyboard navigation, focus, IME, HiDPI and accessibility on Linux; record failures and evidence. Existing resting-layout screenshots do not close this task. |
 | UI-02 | High | Run complete interactive commit, branch, stash, merge and rebase recovery flows on disposable repositories; verify data preservation and meaningful failure states. |
-| UI-03 | Medium | Fix the branch panel at 960×640: the Create and switch button is clipped at the right edge in the deletion-review capture. Verify control visibility and usability at both minimum and default window sizes. Observed in the A-01 smoke run; screenshot is a temporary local artifact, not a committed baseline. |
+| UI-03 | Medium | Done locally in [49a9de727e](https://github.com/leopi99/desktop-rust/commit/49a9de727eebdb487654a63d846872d2912822f5): branch create/rename forms use full-width vertical layout so action labels fit. Offline smoke passed at 960×640 and 1200×800 with unchanged fixtures; normal/deletion-review branch captures visually inspected at both sizes. Full interactive QA remains UI-01/UI-02. |
 | G-02 | Medium | Add hunk selection and richer diff rendering with exact staged/unstaged semantics and large-file limits. |
 | G-03 | Medium | Add rename of other selected branches and further local-history operations in explicit, tested scopes. Force deletion remains unsupported until deliberately designed/reviewed. |
+| G-04 | Medium | Honor global Git `init.defaultBranch` when the initial-branch field is blank, retaining an explicit override and fallback to main only when unset. Propagate lookup/validation failures; test with isolated configuration, never the user's real Git settings. Source gap recorded in the pinned baseline inventory; settings setter/UI is separate scope. |
+| G-05 | Medium | Complete the upstream manual-conflict helper/caller/test audit, then implement explicit reviewed ours/theirs selection for the supported status matrix. Preserve external resolutions, reject stale reviews and test binary/deletion/add-add cases before claiming parity. |
 
 ## Remote alpha and delivery
 

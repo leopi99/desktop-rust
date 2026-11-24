@@ -5,6 +5,25 @@ parity attestation. Use [backlog](backlog.md) for remaining task IDs,
 [quality](quality.md) for engineering rules and `upstream/state.json` for release
 checkpoints. Detailed usage/limitations remain in [the rewrite guide](../rust-rewrite.md).
 
+## Planning estimate
+
+As of 2026-11-24, including the published `quality/rust-foundations` branch:
+
+| Target | Indicative completion | Scope |
+| --- | --- | --- |
+| First local-first Linux alpha | 60–70% | Routine local Git workflows, verified recovery/interaction, minimum installation and documented limits. In-app account features are a later remote-alpha milestone. |
+| Complete rewrite | 30–40% | Stable upstream feature coverage, authentication/integrations, native Windows/macOS support, delivery/updates and cross-platform verification. |
+
+These are coarse engineering planning estimates over broad work areas, with low
+confidence while the full upstream inventory is incomplete. They are not computed
+from test counts, lines of code or equal-sized backlog items. Reassess after
+baseline analysis and real interaction QA; they do not advance parity checkpoints
+or predict a release date. The current branch still needs consolidated review/merge.
+
+The largest remaining areas are upstream contract inventory/ports, interactive
+UI/accessibility QA, stalled-write cancellation, hunk/history/integration features,
+accounts/credentials, engine distribution and packaged cross-platform delivery.
+
 ## Consolidated work
 
 PRs #1–#5 introduced the foundation, history, UI panels and branch rename/deletion.
@@ -43,6 +62,7 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - Rebase plan/collision/ref reads, shared ancestry queries and conflict attributes in `2e273b3ba9`, plus filesystem-based initialization guards. No production generic whole-output reader remains.
 - Final merge-tree/rebase runner migration in `56594e0180`: complete raw protocol limits for merge and marked diagnostic tails with preserved status for rebase. Every Unix Git subprocess now uses shared child/reader ownership.
 - UI update separation in `2f79f69b3d`: 74 messages routed exhaustively to ten typed domain handlers, nine support methods moved with them, and shared completion/refresh handling retained.
+- Branch-form layout fix in `49a9de727e`, verified at the minimum and default window sizes.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
@@ -92,9 +112,13 @@ original guards/bodies, accounting for payload unboxing and formatter changes.
 The fresh Linux/software-rendered smoke run captured eight panels plus three Git
 failure states at 960×640 and verified unchanged fixture files/config/index/refs.
 Changes, History, deletion review and Git timeout captures were visually inspected.
-The deletion-review capture shows a clipped Create and switch button at the right
-edge (UI-03). Temporary captures/report are in `/tmp/desktop-rust-ui-domains-960`;
-they are local evidence and do not automate interaction or accessibility testing.
+The deletion-review capture exposed a clipped Create and switch button (UI-03),
+subsequently fixed in `49a9de727e` with full-width vertical forms. Fresh smoke runs
+passed at 960×640 and 1200×800 (eleven captures each, unchanged fixtures); normal
+and deletion-review branch captures were visually inspected at both sizes.
+Temporary artifacts are in `/tmp/desktop-rust-branch-layout-960` and
+`/tmp/desktop-rust-branch-layout-1200`. They are local evidence and do not automate
+interaction or accessibility testing.
 
 The offline smoke fixture verifies its files, refs, index and config remain
 unchanged. In addition to normal/missing Git it now captures a stalled executable
@@ -117,6 +141,9 @@ The 3.6.10-to-3.6.11 interval is triaged in
 [the baseline note](../upstream/release-3.6.11.md): three ledger records distinguish
 Git distribution, original hotfix runners and upstream release metadata.
 The initial **full baseline** remains pending-analysis; analyzed/parity are unset.
+[The partial pinned inventory](../upstream/baseline-3.6.11-inventory.md) inspects five
+complete source/test files plus selected config functions and identifies configured-default-branch (G-04) and explicit
+manual-conflict-choice (G-05) gaps. Every full-feature inventory row remains open.
 Discovery and watchdog manual success do not prove future scheduled execution.
 Local discovery on 2026-11-24 at 16:32 UTC succeeded with no new stable releases;
 the baseline SHA remained unchanged. Temporary artifacts are in

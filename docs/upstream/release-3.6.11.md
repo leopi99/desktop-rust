@@ -46,3 +46,7 @@ dependencies; compare those contracts with the Rust implementation and record
 remaining behavioral differences, including authentication and distribution.
 Then assess whether the analysis checkpoint can advance. No such advancement is
 part of this increment.
+
+A first partial full-baseline pass is now recorded in
+[the pinned inventory](baseline-3.6.11-inventory.md). It identifies default-branch
+and manual-conflict-choice gaps; the complete inventory and checkpoints remain open.
