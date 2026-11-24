@@ -99,7 +99,7 @@ Only plain pick sequences on the merge backend are supported for continuation.
 Apply-backend rebases, custom todo commands, automatic stash and automatic other-ref
 updates must be managed with Git. Interactive editing, skip and rebase-merges remain
 planned. Preflight checks do not fence concurrent external clients or filesystem
-changes. UI state is tested; visual QA remains outstanding.
+changes. UI state is tested; interactive rebase and conflict UI QA remains outstanding.
 
 ## Merge local branches
 
@@ -128,7 +128,7 @@ is not an undo for a completed fast-forward or merge commit.
 
 Unrelated histories and detached/unborn HEAD are rejected. Previews are not a
 transaction against external Git clients or filesystem changes. Interactive rebase,
-squash merge and cherry-pick workflows remain planned; visual UI QA is outstanding.
+squash merge and cherry-pick workflows remain planned; interactive merge UI QA is outstanding.
 
 ## Review and mark conflicts resolved
 
@@ -165,8 +165,8 @@ files. Ignored-file and symlink-directory collisions are checked before restore.
 Existing work, stale index/HEAD or removed stash entries stop restore. If Git reports
 conflicts, the app refreshes status and retains the stash. Edit conflicted text
 files, review them in the app and mark them resolved before committing the result.
-Automatic conflict editing, stash deletion and pop are not implemented yet. The current UI tests verify state transitions; visual
-QA remains outstanding. Stash operations share the process write lock with other
+Automatic conflict editing, stash deletion and pop are not implemented yet. UI tests verify state transitions; the resting Saved changes panel has been visually checked,
+but interactive save/restore QA remains outstanding. Stash operations share the process write lock with other
 local writes and do not fence concurrent external edits.
 
 ## Create a local repository
@@ -187,7 +187,7 @@ Concurrent external filesystem changes are not a transaction with this preflight
 Git commands ignore inherited repository-routing variables such as `GIT_DIR`,
 `GIT_WORK_TREE` and `GIT_INDEX_FILE`, while keeping normal identity, helper and SSH
 configuration. Initialization is tested end-to-end through the first staged commit;
-visual UI QA remains outstanding.
+the resting Create / Clone panel has been visually checked, but interactive UI QA remains outstanding.
 
 ## Clone and remotes
 
@@ -240,8 +240,55 @@ may have fetched refs, and a clone may leave partial files. The app refreshes th
 repository after interrupted remote actions and does not delete partial clones or
 Git lockfiles. Fetch again to verify remote state before retrying an interrupted push.
 Remote operations run only on explicit actions. Tests use local bare repositories; live
-GitHub authentication and UI visual QA have not been performed.
+GitHub authentication and interactive transfer UI QA have not been performed.
+The resting Remotes and Create / Clone layouts have been visually checked.
 No credentials or original application databases are imported.
+
+## UI layout and visual checks
+
+The sidebar separates Changes, History, Branches, Remotes, Saved changes and
+Create / Clone. File lists and diffs occupy the main workspace; commit fields
+appear only in Changes. A merge/rebase banner keeps operation controls reachable
+while resolving files. Navigation preserves drafts and revokes hidden previews
+and abort/remove confirmations. Busy operations keep their current panel.
+
+The default window is 1200×800 with a minimum of 960×640. A renderer layer clips
+sidebar content, including long paths with the software renderer. Views live in
+`crates/ui/src/layout.rs`; Git operations and their freshness checks are unchanged.
+
+Developer launch options accept a repository, panel and window size:
+
+```sh
+cargo run --locked -p desktop-rust -- --repository /path/to/repo --panel history
+cargo run --locked -p desktop-rust -- --repository /path/to/repo --size 960x640 --capture /tmp/fresh-window.png
+```
+
+`--capture` saves only this application's window as PNG and exits. It refuses
+existing output files and reports failure if the window closes before capture.
+Launch-time repository inspection is read-only and happens before window creation.
+Interactive repository operations continue to use worker threads.
+
+A repeatable offline fixture captures all six panels without touching a real
+project or contacting a remote:
+
+```sh
+cargo build --locked -p desktop-rust
+python3 script/rust-ui-smoke.py --output /tmp/fresh-ui-1200 --size 1200x800
+python3 script/rust-ui-smoke.py --output /tmp/fresh-ui-960 --size 960x640
+```
+
+Each output directory must be new. The script requires a graphical session,
+uses the software renderer unless `ICED_BACKEND` is set, creates and removes a
+temporary repository, and checks that its working files, config, status, refs and
+index remain unchanged. PNGs and `report.json` are local review artifacts, not
+committed baselines. Compare the images manually: capture success alone does not
+establish visual correctness. Automated CI currently runs state tests, not captures.
+
+On 2026-11-24, all six basic panels were captured and visually inspected on Linux
+at 1200×800 and 960×640 using the software renderer. This covers the resting
+layouts with sample changes, history, remote configuration and a stash. Keyboard
+navigation, focus, IME, HiDPI, accessibility, other renderers/platforms, long-list
+scrolling and complete interactive write/conflict flows remain unverified.
 
 ## Stable upstream maintenance
 
@@ -310,4 +357,5 @@ Git tests also cover branch creation/switching, detached and unborn HEAD, invali
 names, stale source/target refs, linked worktrees and preservation of dirty files.
 UI state tests cover draft retention, branch operation results, busy controls,
 write-target invalidation and failed refresh.
-The Iced UI compiles, but visual QA and accessibility testing remain outstanding.
+The six basic Iced panels have had Linux visual layout checks at two window sizes.
+Interactive workflow QA and accessibility testing remain outstanding; see the UI checks above.

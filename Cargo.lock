@@ -749,6 +749,7 @@ dependencies = [
  "desktop-core",
  "desktop-git",
  "iced",
+ "png",
 ]
 
 [[package]]
