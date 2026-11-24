@@ -90,8 +90,7 @@ The signal is a failed Actions run; it does not post issues or messages.
 
 Deploy both workflows to the fork's default branch, enable scheduled Actions and
 manually dispatch discovery once. A manual successful discovery resets the same
-freshness check. Both workflows are currently repository files, not remotely
-activated infrastructure. GitHub can disable scheduled workflows in forks or after
+freshness check. GitHub can disable scheduled workflows in forks or after
 inactivity, so a watchdog inside Actions cannot detect the suspension of all Actions.
 See [GitHub workflow activation rules](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows)
 and [the workflow runs API](https://docs.github.com/en/rest/actions/workflow-runs).
@@ -104,3 +103,28 @@ python3 script/upstream/watchdog.py --repository leopi99/desktop-rust --branch d
 
 Use the actual default branch if it changes. The watchdog does not create schedules,
 change repository settings, publish PRs, or modify the ledger.
+
+## Activation and initial detection
+
+On 2026-11-24, both upstream workflows were active on the fork's default branch,
+`development`. The first manual [stable discovery run](https://github.com/leopi99/desktop-rust/actions/runs/45423201192)
+completed successfully against `23cd98cef2e49cbb962e02060f7e1ed68e50c5e1`, published
+its `upstream-stable-review` artifact, and was followed by a successful manual
+[watchdog run](https://github.com/leopi99/desktop-rust/actions/runs/45423657726).
+These observed runs verify manual execution and freshness checking. Automatic
+weekly/daily scheduling still needs observation over time; an in-Actions watchdog
+cannot detect suspension of all Actions.
+
+The initial detected baseline is `release-3.6.11`, published on
+2026-11-16T12:24:16Z, at commit
+`0102f49aa6c8c554de558299f31b6129b502a2fe`. The ledger copies the discovery
+artifact's proposed `state.json` without advancing `analyzed` or `parity`.
+Its release status remains `pending-analysis`; the empty `changes` list means
+classification has not happened, not that there is nothing to port.
+
+Review the bootstrap detection record before merging it. Keeping that record in
+the default branch is necessary for future discovery runs to accumulate releases
+rather than bootstrap again. The next task is an inventory of this stable source,
+its tests, dependency changes and release notes before any analysis/parity claim.
+The bootstrap deliberately does not import all older publications; it does not
+prove that their behavior is implemented in Rust.
