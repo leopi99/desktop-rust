@@ -14,7 +14,7 @@ const METADATA_LIMIT: usize = 1024 * 1024;
 const FILE_LIST_LIMIT: usize = 4 * 1024 * 1024;
 const FILE_COUNT_LIMIT: usize = 10_000;
 
-fn validate_oid(oid: &str) -> io::Result<()> {
+pub(super) fn validate_oid(oid: &str) -> io::Result<()> {
     if !matches!(oid.len(), 40 | 64) || !oid.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

@@ -1,4 +1,6 @@
 //! Git adapter with literal path arguments and serialized local writes.
+mod basis;
+use basis::commit_basis;
 mod branches;
 mod conflicts;
 pub use conflicts::{inspect_conflict, resolve_conflict};
@@ -73,10 +75,6 @@ fn read_bytes<S: AsRef<OsStr>>(path: &Path, args: &[S]) -> io::Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn read(path: &Path, args: &[&str]) -> io::Result<String> {
-    Ok(String::from_utf8_lossy(&read_bytes(path, args)?).into_owned())
-}
-
 fn file_path(bytes: &[u8]) -> io::Result<PathBuf> {
     #[cfg(unix)]
     {
@@ -92,9 +90,10 @@ fn file_path(bytes: &[u8]) -> io::Result<PathBuf> {
 }
 
 fn changes(path: &Path) -> io::Result<Vec<FileChange>> {
-    let output = read_bytes(
+    let output = read_output::complete(
         path,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        8 * 1024 * 1024,
     )?;
     let mut records = output.split(|b| *b == 0).filter(|r| !r.is_empty());
     let mut changes = Vec::new();
@@ -128,10 +127,15 @@ fn changes(path: &Path) -> io::Result<Vec<FileChange>> {
 ///
 /// Returns an error if Git cannot inspect the repository or its metadata is malformed.
 pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
-    let root = read_bytes(path, &["rev-parse", "--show-toplevel"])?;
+    let root = read_output::complete(path, &["rev-parse", "--show-toplevel"], 64 * 1024)?;
     // Git terminates this path with one newline; filenames may themselves contain newlines.
     let root = file_path(root.strip_suffix(b"\n").unwrap_or(&root))?;
-    let status = read(&root, &["status", "--short", "--branch"])?;
+    let status = String::from_utf8_lossy(&read_output::complete(
+        &root,
+        &["status", "--short", "--branch"],
+        8 * 1024 * 1024,
+    )?)
+    .into_owned();
     let commit_basis = commit_basis(&root)?;
     let commits = if let Some(head) = &commit_basis.head {
         history::commit_history(&root, head.trim(), 0)?
@@ -359,18 +363,4 @@ pub fn commit(path: &Path, message: &str, expected: &CommitBasis) -> io::Result<
         return Err(io::Error::other("No staged changes to commit"));
     }
     run_write(path, &["commit", "--file=-"], Some(message))
-}
-
-fn commit_basis(path: &Path) -> io::Result<CommitBasis> {
-    let branch = match read_bytes(path, &["symbolic-ref", "--quiet", "HEAD"]) {
-        Ok(bytes) => Some(file_path(bytes.strip_suffix(b"\n").unwrap_or(&bytes))?.into_os_string()),
-        Err(_) => None,
-    };
-    Ok(CommitBasis {
-        index: read_bytes(path, &["ls-files", "--stage", "-z"])?,
-        head: read(path, &["rev-parse", "--verify", "HEAD"]).ok(),
-        branch,
-        merge_heads: merge::metadata(path, "MERGE_HEAD")?,
-        rebase: rebase::state(path)?,
-    })
 }

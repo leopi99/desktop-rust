@@ -1,5 +1,5 @@
 //! Local branch merge previews and explicit merge/abort operations.
-use super::{commit_basis, file_path, git_command, read_bytes, run_write, snapshot, WRITE_LOCK};
+use super::{commit_basis, file_path, git_command, run_write, snapshot, WRITE_LOCK};
 use desktop_core::{CommitBasis, LocalBranch, MergeKind, MergePreview};
 use std::{
     ffi::OsString,
@@ -8,7 +8,7 @@ use std::{
 };
 
 pub(super) fn metadata_path(root: &Path, name: &str) -> io::Result<PathBuf> {
-    let bytes = read_bytes(root, &["rev-parse", "--git-path", name])?;
+    let bytes = super::read_output::complete(root, &["rev-parse", "--git-path", name], 64 * 1024)?;
     let path = file_path(bytes.strip_suffix(b"\n").unwrap_or(&bytes))?;
     Ok(if path.is_absolute() {
         path

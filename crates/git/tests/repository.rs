@@ -1135,3 +1135,124 @@ fn noisy_successful_hook_keeps_full_commit_message_and_unstaged_data() {
     assert_eq!(committed.stdout, b"staged\n");
     assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
 }
+
+#[test]
+fn oversized_index_and_status_refuse_writes_without_losing_freshness_data() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let repo = Fixture::new();
+    repo.write("file", b"base\n");
+    repo.commit();
+    repo.write("file", b"working\n");
+    let observed = desktop_git::snapshot(&repo.0).unwrap();
+    let original_index = std::fs::read(repo.0.join(".git/index")).unwrap();
+    let blob = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["rev-parse", "HEAD:file"])
+        .output()
+        .unwrap();
+    assert!(blob.status.success());
+    let blob = String::from_utf8(blob.stdout).unwrap();
+    let component = "p".repeat(100);
+    let mut records = Vec::new();
+    for index in 0..33_000 {
+        records.extend_from_slice(format!("100644 {}\tvirtual/{index:05}/{component}/{component}/{component}/{component}/{component}/file\n", blob.trim()).as_bytes());
+    }
+    let mut update = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["update-index", "--index-info"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    update.stdin.take().unwrap().write_all(&records).unwrap();
+    let result = update.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let large_index = std::fs::read(repo.0.join(".git/index")).unwrap();
+    assert_eq!(
+        desktop_git::commit(
+            &repo.0,
+            "must not commit partial state",
+            &observed.commit_basis
+        )
+        .unwrap_err()
+        .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::stage(&repo.0, &observed.changes[0])
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::snapshot(&repo.0).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        std::fs::read(repo.0.join(".git/index")).unwrap(),
+        large_index
+    );
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+    let head = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(head.status.success());
+    assert_eq!(head.stdout, observed.commit_basis.head.unwrap().as_bytes());
+    // Restore only this disposable fixture's index, then verify a fresh operation succeeds.
+    std::fs::write(repo.0.join(".git/index"), original_index).unwrap();
+    desktop_git::stage(&repo.0, &observed.changes[0]).unwrap();
+    let refreshed = desktop_git::snapshot(&repo.0).unwrap();
+    desktop_git::commit(
+        &repo.0,
+        "Recovered after oversized scan",
+        &refreshed.commit_basis,
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+}
+
+#[test]
+fn oversized_branch_list_fails_instead_of_returning_a_partial_snapshot() {
+    let repo = Fixture::new();
+    repo.write("file", b"base\n");
+    repo.commit();
+    let before = desktop_git::snapshot(&repo.0).unwrap();
+    let oid = before.commit_basis.head.as_ref().unwrap().trim();
+    let mut packed = String::from("# pack-refs with: sorted\n");
+    for index in 0..40_000 {
+        packed.push_str(&format!(
+            "{oid} refs/heads/test-{index:05}-{}\n",
+            "b".repeat(100)
+        ));
+    }
+    std::fs::write(repo.0.join(".git/packed-refs"), &packed).unwrap();
+    assert_eq!(
+        desktop_git::snapshot(&repo.0).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.0.join(".git/packed-refs")).unwrap(),
+        packed
+    );
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"base\n");
+    std::fs::write(
+        repo.0.join(".git/packed-refs"),
+        b"# pack-refs with: sorted\n",
+    )
+    .unwrap();
+    assert_eq!(
+        desktop_git::snapshot(&repo.0).unwrap().commit_basis,
+        before.commit_basis
+    );
+}

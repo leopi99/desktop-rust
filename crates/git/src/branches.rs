@@ -4,7 +4,7 @@ use desktop_core::{CommitBasis, LocalBranch};
 use std::{ffi::OsStr, io, path::Path};
 
 pub(super) fn list(path: &Path) -> io::Result<Vec<LocalBranch>> {
-    let bytes = read_bytes(
+    let bytes = super::read_output::complete(
         path,
         &[
             "for-each-ref",
@@ -12,6 +12,7 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<LocalBranch>> {
             "--format=%(refname)%00%(objectname)%00%(HEAD)",
             "refs/heads/",
         ],
+        4 * 1024 * 1024,
     )?;
     bytes
         .split(|b| *b == b'\n')
