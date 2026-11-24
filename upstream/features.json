@@ -2,6 +2,7 @@
   "schema_version": 1,
   "features": [
     { "id": "repository-init", "status": "prototype" },
+    { "id": "commit-history", "status": "prototype" },
     { "id": "repository-read", "status": "prototype" },
     { "id": "diff", "status": "prototype" },
     { "id": "stage-commit", "status": "prototype" },
