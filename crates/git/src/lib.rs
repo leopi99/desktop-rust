@@ -26,9 +26,9 @@ pub use remotes::{
 };
 use std::{
     ffi::OsStr,
-    io::{self, Write},
+    io,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     sync::Mutex,
 };
 pub use transfer::TransferControl;
@@ -246,38 +246,9 @@ pub fn diff(path: &Path, selected: &FileChange) -> io::Result<FileDiff> {
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 fn run_write<S: AsRef<OsStr>>(path: &Path, args: &[S], input: Option<&str>) -> io::Result<String> {
-    let mut child = git_command(path)
-        .args(args)
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let input_result = if let Some(message) = input {
-        match child.stdin.take() {
-            Some(mut stdin) => stdin.write_all(message.as_bytes()),
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::other("Git stdin pipe was not created"));
-            }
-        }
-    } else {
-        Ok(())
-    };
-    let output = child.wait_with_output()?;
-    if !output.status.success() {
-        return Err(io::Error::other(format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
-    input_result?;
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    let mut command = git_command(path);
+    command.args(args);
+    process::write_output(command, input)
 }
 
 fn validate_selection(path: &Path, selected: &FileChange) -> io::Result<()> {

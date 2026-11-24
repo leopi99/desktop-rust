@@ -1,11 +1,14 @@
 //! Shared child setup and cleanup; output policies live with their callers.
 use std::{
     io,
-    process::{Child, ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio},
 };
 
 #[cfg(unix)]
 use std::{thread, time::Duration};
+
+mod write;
+pub(super) use write::write_output;
 
 mod readers;
 pub(super) use readers::Readers;
@@ -23,6 +26,14 @@ pub(super) struct ManagedChild {
 }
 
 impl ManagedChild {
+    pub(super) fn take_stdin(&mut self) -> Option<ChildStdin> {
+        self.child.stdin.take()
+    }
+
+    pub(super) fn wait(&mut self) -> io::Result<ExitStatus> {
+        self.child.wait()
+    }
+
     pub(super) fn take_stdout(&mut self) -> Option<ChildStdout> {
         self.child.stdout.take()
     }
@@ -38,8 +49,13 @@ impl ManagedChild {
 
 /// Start a piped child with closed stdin and a separate process group on Unix.
 pub(super) fn spawn(command: &mut Command) -> io::Result<ManagedChild> {
+    spawn_with_stdin(command, Stdio::null())
+}
+
+/// Start a managed child with the caller's input policy and two output pipes.
+pub(super) fn spawn_with_stdin(command: &mut Command, stdin: Stdio) -> io::Result<ManagedChild> {
     command
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(unix)]

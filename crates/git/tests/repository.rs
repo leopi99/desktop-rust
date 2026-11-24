@@ -1048,3 +1048,90 @@ fn clipped_tracked_diff_keeps_native_path_and_disables_textconv() {
     assert!(diff.unstaged.len() < 257 * 1024);
     assert_eq!(std::fs::read(repo.0.join(name)).unwrap(), content);
 }
+
+#[cfg(unix)]
+fn noisy_commit_hook(repo: &Fixture, reject: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let hooks = repo.0.join(".git/hooks");
+    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    let hook = hooks.join("pre-commit");
+    std::fs::write(&hook, format!("#!/bin/sh\nhead -c 2097152 /dev/zero\nhead -c 2097152 /dev/zero >&2\nprintf 'hook diagnostic tail' >&2\nexit {}\n", if reject { 1 } else { 0 })).unwrap();
+    std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn noisy_rejected_hook_keeps_staged_and_working_data_and_allows_retry() {
+    let repo = Fixture::new();
+    repo.write("file", b"base\n");
+    repo.commit();
+    repo.write("file", b"staged\n");
+    repo.git(&["add", "--", "file"]);
+    repo.write("file", b"working\n");
+    repo.write("untracked", b"keep\n");
+    let before = desktop_git::snapshot(&repo.0).unwrap().commit_basis;
+    noisy_commit_hook(&repo, true);
+    let message = format!("Large rejected commit\n\n{}", "body line\n".repeat(250_000));
+    let error = desktop_git::commit(&repo.0, &message, &before)
+        .unwrap_err()
+        .to_string();
+    // Git routes hook stdout to its stderr as well.
+    assert!(error.contains("Git stderr earlier output truncated"));
+    assert!(error.ends_with("hook diagnostic tail"));
+    assert!(error.len() < 2 * 64 * 1024 + 200);
+    assert_eq!(desktop_git::snapshot(&repo.0).unwrap().commit_basis, before);
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+    assert_eq!(std::fs::read(repo.0.join("untracked")).unwrap(), b"keep\n");
+    repo.git(&["config", "core.hooksPath", "/dev/null"]);
+    desktop_git::commit(&repo.0, "Retry after hook failure", &before).unwrap();
+    let committed = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["show", "HEAD:file"])
+        .output()
+        .unwrap();
+    assert!(committed.status.success());
+    assert_eq!(committed.stdout, b"staged\n");
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn noisy_successful_hook_keeps_full_commit_message_and_unstaged_data() {
+    let repo = Fixture::new();
+    repo.write("file", b"staged\n");
+    repo.git(&["add", "--", "file"]);
+    repo.write("file", b"working\n");
+    let before = desktop_git::snapshot(&repo.0).unwrap().commit_basis;
+    noisy_commit_hook(&repo, false);
+    let message = format!(
+        "Large successful commit\n\n{}",
+        "body line\n".repeat(250_000)
+    );
+    let result = desktop_git::commit(&repo.0, &message, &before).unwrap();
+    assert!(result.contains("Large successful commit"));
+    assert!(!result.contains("hook diagnostic tail"));
+    assert!(result.len() < 64 * 1024 + 100);
+    let stored = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["log", "-1", "--format=%B"])
+        .output()
+        .unwrap();
+    assert!(stored.status.success());
+    assert_eq!(
+        String::from_utf8(stored.stdout)
+            .unwrap()
+            .trim_end_matches('\n'),
+        message.trim_end_matches('\n')
+    );
+    let committed = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["show", "HEAD:file"])
+        .output()
+        .unwrap();
+    assert!(committed.status.success());
+    assert_eq!(committed.stdout, b"staged\n");
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+}
