@@ -42,14 +42,16 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - Remote/stash metadata and branch config/worktree limits in `80fd340d1c`, including remote/URL counts, bounded stash collision review, one tracked-path scan and propagation of stash third-parent read errors.
 - Rebase plan/collision/ref reads, shared ancestry queries and conflict attributes in `2e273b3ba9`, plus filesystem-based initialization guards. No production generic whole-output reader remains.
 - Final merge-tree/rebase runner migration in `56594e0180`: complete raw protocol limits for merge and marked diagnostic tails with preserved status for rebase. Every Unix Git subprocess now uses shared child/reader ownership.
+- UI update separation in `2f79f69b3d`: 74 messages routed exhaustively to ten typed domain handlers, nine support methods moved with them, and shared completion/refresh handling retained.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
 work before the next milestone PR. The active branch stays `quality/rust-foundations`
 for this reliability batch; continue from it rather than dropping its unmerged
 policy by starting again from `development`. Shared capture migration is locally
-complete on Unix; stalled-write policy and UI handler separation remain coherent
-follow-ups. R-05 now covers core snapshot/freshness scans and the
+complete on Unix, and UI handler separation is locally complete. The current
+implementation scope is ready for consolidated batch review; stalled-write policy
+remains a follow-up. R-05 now covers core snapshot/freshness scans and the
 remote/stash/branch-config/worktree adapters and rebase/conflict preflight reads.
 Merge-tree structured output and rebase diagnostics now use bounded capture;
 R-03 and R-05 are locally complete on Unix, verified on Linux. Windows still has
@@ -83,6 +85,16 @@ project files. Final-runner regressions verify raw protocol limits/status, child
 completion before overflow errors, verbose merge-driver rejection without user
 state changes and noisy rebase pause/abort. Record fresh results for later behavior changes; these counts are dated observations, not a
 permanent coverage guarantee.
+
+For the UI refactor, all 82 existing UI state tests pass within the 287-test suite;
+no new tests merely mirror the file split. Extraction review compared all 74
+original guards/bodies, accounting for payload unboxing and formatter changes.
+The fresh Linux/software-rendered smoke run captured eight panels plus three Git
+failure states at 960×640 and verified unchanged fixture files/config/index/refs.
+Changes, History, deletion review and Git timeout captures were visually inspected.
+The deletion-review capture shows a clipped Create and switch button at the right
+edge (UI-03). Temporary captures/report are in `/tmp/desktop-rust-ui-domains-960`;
+they are local evidence and do not automate interaction or accessibility testing.
 
 The offline smoke fixture verifies its files, refs, index and config remain
 unchanged. In addition to normal/missing Git it now captures a stalled executable

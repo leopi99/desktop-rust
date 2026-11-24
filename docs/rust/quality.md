@@ -98,6 +98,15 @@ Review destructive Git operations, authentication/trust boundaries, unsafe adapt
 and release/supply-chain changes in depth as required by the PR skill. Automated
 checks do not waive that review or advance upstream parity checkpoints.
 
+UI transitions live in `crates/ui/src/update/`: keep the top-level dispatcher
+exhaustive and domain event matches exhaustive, with explicit ignored variants
+for failed guards. Do not add a catch-all that silently absorbs new events. Keep
+completion/refresh draft and review invalidation together, and move cohesive
+helpers with their domain. Box large successful response payloads when required
+by enum-size checks; do not clone snapshots/reviews just to route a message.
+Exercise existing state regressions for routing changes and add behavioral tests
+when changing a guard or transition, rather than tests of file organization.
+
 ## Updating the policy
 
 Change the pinned compiler, workspace minimum and CI installer together, then run

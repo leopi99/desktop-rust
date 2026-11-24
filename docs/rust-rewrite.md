@@ -279,6 +279,23 @@ remains planned. Commit controls are hidden in History; switch to Changes to
 prepare a new commit. Resting layouts have been visually checked; interactive
 history navigation QA remains outstanding.
 
+## UI transition modules
+
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 74 message
+variants to typed events in ten domain handlers: application/navigation,
+repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
+stashes and completion/refresh. Guard failures explicitly match the relevant
+events; adding an unhandled variant fails compilation. Worker callbacks continue
+to return application messages. Successful large response payloads are boxed at
+the internal routing boundary without cloning their data.
+
+Domain helpers live with their handlers. Completion/refresh handling centralizes
+draft updates, review invalidation and snapshot refresh. The existing 82 state
+tests cover busy guards, drafts, confirmations, failures and transfer freshness.
+The refactor's offline smoke run produced eleven captures at 960×640 with unchanged
+fixture data; this does not prove full interactive QA. The branch deletion-review
+capture exposes right-edge button clipping tracked as UI-03.
+
 ## Development checks
 
 The Rust app uses Cargo. The inherited source is also checked with the repository's
