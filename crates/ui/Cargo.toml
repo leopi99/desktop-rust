@@ -1,0 +1,10 @@
+[package]
+name = "desktop-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+desktop-core = { path = "../core" }
+desktop-git = { path = "../git" }
+iced = "0.13"
