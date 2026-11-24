@@ -11,6 +11,7 @@ pub(super) struct Start {
     repository: Option<PathBuf>,
     pub capture: Option<PathBuf>,
     panel: Panel,
+    review_delete: bool,
     pub size: iced::Size,
 }
 
@@ -20,12 +21,13 @@ impl Start {
             repository: None,
             capture: None,
             panel: Panel::Changes,
+            review_delete: false,
             size: iced::Size::new(1200.0, 800.0),
         };
         let mut args = args.into_iter();
         while let Some(flag) = args.next() {
             if flag == "--help" {
-                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
+                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|branch-delete-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
                 return Ok(None);
             }
             if !["--repository", "--panel", "--size", "--capture"]
@@ -39,10 +41,11 @@ impl Start {
                 Some("--repository") => start.repository = Some(value.into()),
                 Some("--capture") => start.capture = Some(value.into()),
                 Some("--panel") => {
+                    start.review_delete = value == "branch-delete-review";
                     start.panel = match value.to_str() {
                         Some("changes") => Panel::Changes,
                         Some("history") => Panel::History,
-                        Some("branches") => Panel::Branches,
+                        Some("branches" | "branch-delete-review") => Panel::Branches,
                         Some("remotes") => Panel::Remotes,
                         Some("stash") => Panel::Stashes,
                         Some("repository") => Panel::Repository,
@@ -63,6 +66,9 @@ impl Start {
                 }
                 _ => unreachable!(),
             }
+        }
+        if start.review_delete && (start.capture.is_none() || start.repository.is_none()) {
+            return Err("branch-delete-review requires --repository and --capture".into());
         }
         if start.capture.as_ref().is_some_and(|path| path.exists()) {
             return Err("Capture output already exists; choose a fresh path".into());
@@ -99,6 +105,20 @@ impl Start {
                 app.select_remote(remote);
             }
         }
+        if self.review_delete {
+            let branch = app
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.branches.iter().find(|branch| !branch.is_current))
+                .cloned()
+                .ok_or("Deletion review capture needs a non-current local branch")?;
+            let _ = app.update(Message::BranchSelected(branch));
+            // Render the review only. Never send Message::DeleteBranch here.
+            let _ = app.update(Message::RequestDeleteBranch);
+            if app.delete_branch_pending.is_none() {
+                return Err("The repository cannot currently review branch deletion".into());
+            }
+        }
         Ok(app)
     }
 }
@@ -131,6 +151,13 @@ mod tests {
             vec!["--capture"],
             vec!["--wat"],
             vec!["--panel", "invalid"],
+            vec!["--panel", "branch-delete-review"],
+            vec![
+                "--panel",
+                "branch-delete-review",
+                "--repository",
+                "/tmp/repo",
+            ],
             vec!["--size", "NaNx800"],
             vec!["--size", "799x600"],
             vec!["--size", "1200x599"],

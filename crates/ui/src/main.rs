@@ -45,6 +45,7 @@ struct Desktop {
     new_branch: String,
     rename_branch: String,
     target_branch: Option<LocalBranch>,
+    delete_branch_pending: Option<LocalBranch>,
     merge_preview: Option<MergePreview>,
     abort_merge_pending: bool,
     rebase_preview: Option<RebasePreview>,
@@ -98,6 +99,9 @@ enum Message {
     BranchNameChanged(String),
     RenameBranchNameChanged(String),
     RenameCurrentBranch,
+    RequestDeleteBranch,
+    CancelDeleteBranch,
+    DeleteBranch,
     BranchSelected(LocalBranch),
     CreateBranch,
     SwitchBranch,
@@ -150,6 +154,7 @@ enum Operation {
     Commit,
     CreateBranch,
     RenameBranch,
+    DeleteBranch,
     SwitchBranch,
     Remote,
     RemoteConfig(RemoteEdit),
@@ -230,6 +235,7 @@ impl Desktop {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::PanelSelected(panel) if !self.loading => {
+                self.delete_branch_pending = None;
                 self.panel = panel;
                 self.show_history = panel == Panel::History;
                 self.show_stashes = panel == Panel::Stashes;
@@ -264,6 +270,7 @@ impl Desktop {
                 return iced::exit();
             }
             Message::ShowHistory(show) if !self.loading => {
+                self.delete_branch_pending = None;
                 self.panel = if show { Panel::History } else { Panel::Changes };
                 self.show_history = show;
                 self.commit_details = None;
@@ -398,6 +405,7 @@ impl Desktop {
                 self.transfer_progress = output.replace('\r', "\n");
             }
             Message::PathChanged(path) if !self.loading => {
+                self.delete_branch_pending = None;
                 self.path = path;
                 self.snapshot = None;
                 self.clear_history();
@@ -453,6 +461,7 @@ impl Desktop {
             Message::BranchNameChanged(value) if !self.loading => self.new_branch = value,
             Message::RenameBranchNameChanged(value) if !self.loading => self.rename_branch = value,
             Message::BranchSelected(branch) if !self.loading => {
+                self.delete_branch_pending = None;
                 self.target_branch = Some(branch);
                 self.merge_preview = None;
                 self.rebase_preview = None;
@@ -460,6 +469,7 @@ impl Desktop {
             Message::SummaryChanged(value) if !self.loading => self.summary = value,
             Message::DescriptionChanged(value) if !self.loading => self.description = value,
             Message::Open if !self.loading => {
+                self.delete_branch_pending = None;
                 if self.snapshot.is_none() {
                     self.panel = Panel::Changes;
                     self.show_history = false;
@@ -484,6 +494,7 @@ impl Desktop {
                 );
             }
             Message::Loaded(result) => {
+                self.delete_branch_pending = None;
                 self.loading = false;
                 match result {
                     Ok(snapshot) => {
@@ -658,6 +669,40 @@ impl Desktop {
                         move || desktop_git::rename_current_branch(&path, &name, &expected),
                         |result| Message::Wrote(Operation::RenameBranch, result),
                     );
+                }
+            }
+            Message::RequestDeleteBranch if !self.loading && self.panel == Panel::Branches => {
+                self.delete_branch_pending = None;
+                if let (Some(snapshot), Some(branch)) = (&self.snapshot, &self.target_branch) {
+                    if snapshot.commit_basis.branch.is_some()
+                        && snapshot.commit_basis.head.is_some()
+                        && snapshot.commit_basis.merge_heads.is_none()
+                        && snapshot.commit_basis.rebase.is_none()
+                        && !branch.is_current
+                        && snapshot.branches.contains(branch)
+                    {
+                        self.delete_branch_pending = Some(branch.clone());
+                    }
+                }
+            }
+            Message::CancelDeleteBranch => self.delete_branch_pending = None,
+            Message::DeleteBranch if !self.loading && self.panel == Panel::Branches => {
+                if let Some(branch) = self.delete_branch_pending.take() {
+                    if let Some(snapshot) = &self.snapshot {
+                        if self.target_branch.as_ref() != Some(&branch)
+                            || !snapshot.branches.contains(&branch)
+                        {
+                            return Task::none();
+                        }
+                        let path = snapshot.repository.path.clone();
+                        let expected = snapshot.commit_basis.clone();
+                        self.loading = true;
+                        self.notice = String::from("Deleting reviewed local branch…");
+                        return worker(
+                            move || desktop_git::delete_local_branch(&path, &branch, &expected),
+                            |result| Message::Wrote(Operation::DeleteBranch, result),
+                        );
+                    }
                 }
             }
             Message::SwitchBranch if !self.loading => {
@@ -942,6 +987,7 @@ impl Desktop {
                 }
             }
             Message::Wrote(operation, result) => {
+                self.delete_branch_pending = None;
                 if matches!(
                     operation,
                     Operation::Merge
@@ -1012,6 +1058,7 @@ impl Desktop {
                 }
             }
             Message::Refreshed(result) => {
+                self.delete_branch_pending = None;
                 self.loading = false;
                 match result {
                     Ok(snapshot) => {
@@ -1270,6 +1317,7 @@ impl Desktop {
     }
 
     fn open_created_repository(&mut self, path: std::path::PathBuf, notice: &str) -> Task<Message> {
+        self.delete_branch_pending = None;
         self.panel = Panel::Changes;
         self.show_history = false;
         self.path = path.to_string_lossy().into_owned();
@@ -2548,6 +2596,119 @@ mod tests {
             assert!(!app.loading, "{state}");
             assert_eq!(app.rename_branch, "renamed");
             assert!(app.notice.contains("committed local branch"));
+        }
+    }
+    fn delete_app() -> Desktop {
+        let mut app = loaded();
+        app.panel = Panel::Branches;
+        let snapshot = app.snapshot.as_mut().unwrap();
+        snapshot.commit_basis.branch = Some("refs/heads/main".into());
+        snapshot.commit_basis.head = Some("a".repeat(40));
+        snapshot.branches.push(target());
+        app.target_branch = Some(target());
+        app
+    }
+
+    #[test]
+    fn deletion_requires_a_current_confirmation_and_cancel_revokes_it() {
+        let mut app = delete_app();
+        let _ = app.update(Message::DeleteBranch);
+        assert!(!app.loading);
+        let _ = app.update(Message::RequestDeleteBranch);
+        assert_eq!(app.delete_branch_pending, Some(target()));
+        let _ = app.update(Message::CancelDeleteBranch);
+        let _ = app.update(Message::DeleteBranch);
+        assert!(!app.loading);
+        let _ = app.update(Message::RequestDeleteBranch);
+        let _ = app.update(Message::DeleteBranch);
+        assert!(app.loading);
+        assert!(app.delete_branch_pending.is_none());
+    }
+
+    #[test]
+    fn selection_navigation_and_refresh_revoke_branch_deletion_confirmation() {
+        for change in ["selection", "panel", "refresh", "path"] {
+            let mut app = delete_app();
+            let _ = app.update(Message::RequestDeleteBranch);
+            match change {
+                "selection" => {
+                    let _ = app.update(Message::BranchSelected(target()));
+                }
+                "panel" => {
+                    let _ = app.update(Message::PanelSelected(Panel::Remotes));
+                }
+                "refresh" => {
+                    let snapshot = app.snapshot.clone().unwrap();
+                    let _ = app.update(Message::Refreshed(Ok(snapshot)));
+                }
+                _ => {
+                    let _ = app.update(Message::PathChanged("/new".into()));
+                }
+            }
+            assert!(app.delete_branch_pending.is_none(), "{change}");
+            let _ = app.update(Message::DeleteBranch);
+            assert!(!app.loading);
+        }
+    }
+
+    #[test]
+    fn busy_ui_cannot_confirm_or_repeat_branch_deletion() {
+        let mut app = delete_app();
+        app.loading = true;
+        let _ = app.update(Message::RequestDeleteBranch);
+        let _ = app.update(Message::DeleteBranch);
+        assert!(app.delete_branch_pending.is_none());
+        assert!(app.notice.is_empty());
+    }
+
+    #[test]
+    fn changed_selection_cannot_reuse_a_reviewed_branch_even_without_navigation() {
+        let mut app = delete_app();
+        let _ = app.update(Message::RequestDeleteBranch);
+        app.target_branch.as_mut().unwrap().oid = "b".repeat(40);
+        let _ = app.update(Message::DeleteBranch);
+        assert!(!app.loading);
+        assert!(app.delete_branch_pending.is_none());
+    }
+
+    #[test]
+    fn deletion_failure_refreshes_without_clearing_other_drafts_or_reusing_confirmation() {
+        let mut app = delete_app();
+        app.new_branch = "create draft".into();
+        app.rename_branch = "rename draft".into();
+        let _ = app.update(Message::RequestDeleteBranch);
+        let _ = app.update(Message::Wrote(
+            Operation::DeleteBranch,
+            Err("Not merged".into()),
+        ));
+        assert!(app.loading);
+        assert_eq!(app.panel, Panel::Branches);
+        assert!(app.delete_branch_pending.is_none());
+        assert!(app.target_branch.is_none());
+        assert_eq!(app.new_branch, "create draft");
+        assert_eq!(app.rename_branch, "rename draft");
+        assert_eq!(app.summary, "Summary");
+        assert!(app.notice.contains("Not merged"));
+    }
+
+    #[test]
+    fn current_unborn_detached_and_active_branch_states_cannot_request_deletion() {
+        for state in ["current", "unborn", "detached", "merge", "rebase"] {
+            let mut app = delete_app();
+            match state {
+                "current" => app.target_branch.as_mut().unwrap().is_current = true,
+                "unborn" => app.snapshot.as_mut().unwrap().commit_basis.head = None,
+                "detached" => app.snapshot.as_mut().unwrap().commit_basis.branch = None,
+                "merge" => {
+                    app.snapshot.as_mut().unwrap().commit_basis.merge_heads = Some(Vec::new())
+                }
+                _ => {
+                    app.snapshot.as_mut().unwrap().commit_basis.rebase =
+                        pending_rebase().snapshot.unwrap().commit_basis.rebase;
+                }
+            }
+            let _ = app.update(Message::RequestDeleteBranch);
+            assert!(app.delete_branch_pending.is_none(), "{state}");
         }
     }
 }

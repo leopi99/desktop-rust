@@ -199,6 +199,62 @@ pub fn rename_current_branch(
     ))
 }
 
+/// Delete an observed non-current local branch only when its tip is merged into
+/// the current HEAD. Git also checks its upstream and linked-worktree use.
+/// No forced deletion or remote operation is performed. External clients can
+/// still race between preflight checks and Git acquiring its own ref locks.
+pub fn delete_local_branch(
+    path: &Path,
+    selected: &LocalBranch,
+    expected: &CommitBasis,
+) -> io::Result<String> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("Write lock poisoned"))?;
+    validate_basis(path, expected)?;
+    super::merge::ensure_idle(path)?;
+    let (Some(current), Some(head)) = (&expected.branch, &expected.head) else {
+        return Err(io::Error::other(
+            "Select a committed local branch before deleting another branch",
+        ));
+    };
+    let mut full_ref = std::ffi::OsString::from("refs/heads/");
+    full_ref.push(&selected.name);
+    if selected.is_current || &full_ref == current {
+        return Err(io::Error::other("Cannot delete the current branch"));
+    }
+    if selected.name.as_encoded_bytes().starts_with(b"-") || selected.name == OsStr::new("HEAD") {
+        return Err(io::Error::other("Unsupported reserved branch name"));
+    }
+    if !list(path)?
+        .iter()
+        .any(|branch| branch.name == selected.name && branch.oid == selected.oid)
+    {
+        return Err(io::Error::other(
+            "The selected branch changed or was deleted; refresh before deleting",
+        ));
+    }
+    if !super::merge::ancestor(path, &selected.oid, head.trim())? {
+        return Err(io::Error::other(
+            "The selected branch contains commits not merged into the current branch",
+        ));
+    }
+    run_write(
+        path,
+        &[
+            OsStr::new("branch"),
+            OsStr::new("--delete"),
+            OsStr::new("--"),
+            selected.name.as_os_str(),
+        ],
+        None,
+    )?;
+    Ok(format!(
+        "Deleted local branch {}. Remote branches are unchanged.",
+        selected.name.to_string_lossy()
+    ))
+}
+
 /// Validate a literal local branch name without expanding previous-checkout shorthand.
 pub(super) fn validate_name(path: &Path, name: &str) -> io::Result<()> {
     if name.is_empty() || name.starts_with('-') || name == "HEAD" {

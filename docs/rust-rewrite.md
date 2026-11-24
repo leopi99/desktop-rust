@@ -58,14 +58,53 @@ reflog, index/file preservation, stale observations, destination collisions,
 sequencer state, linked worktrees and native non-UTF-8 source names on Unix.
 
 This is a prototype under the existing `branches` feature in the upstream ledger.
-Renaming a different selected branch, deleting branches and case-only renames
-requiring a forced retry remain planned. The reference implementation in
+Renaming a different selected branch and case-only renames requiring a forced
+retry remain planned. Safe deletion of merged local branches is described below. The reference implementation in
 `app/src/lib/git/branch.ts` supports a wider scope; this increment does not claim
 complete branch parity or advance release checkpoints. The input accepts a UTF-8
 new name, while an existing source name retains its native filesystem encoding.
 The updated resting Branches panel has been captured and visually inspected on
 Linux with the software renderer at 960×640 and 1200×800. Interactive keyboard
 and end-to-end UI rename checks remain outstanding.
+
+## Delete a merged local branch
+
+In Branches, select a non-current local branch, then Delete selected branch.
+Review its name and full commit ID and confirm Delete reviewed local branch.
+This removes the local ref, reflog and local branch settings. It does not contact
+a server or delete remote branches or remote-tracking refs. Current HEAD,
+commit drafts, staged/unstaged changes and untracked files are preserved.
+
+The selected tip must be an ancestor of the observed current HEAD. Merely being
+published to its upstream is insufficient. The operation uses `git branch --delete`
+without force, so Git may also refuse when the branch has commits missing from
+its configured upstream even if the current branch contains them. There is no
+force-delete fallback. Branches checked out in linked worktrees are rejected by Git.
+
+Deletion requires a committed local current branch, an unchanged index/HEAD/branch
+observation, and the same selected branch name and object ID. Active merge,
+rebase, cherry-pick and revert operations block it. Selection changes, panel or
+repository navigation, refresh and write completion revoke the confirmation.
+Failures refresh the actual repository state and require a new review; unrelated
+creation, rename and commit drafts are retained.
+
+Preflight checks and the process mutex do not lock out external Git clients.
+Another client can still race after the checks and before Git acquires its ref
+locks. This feature does not claim atomic compare-and-delete against the reviewed
+object ID or protection against concurrent external config changes. The original
+TypeScript adapter supports forced deletion; that scope remains deferred under
+the existing `branches` feature. Release analysis/parity checkpoints are unchanged.
+
+Git integration tests cover merged/unmerged history, tracked upstream checks,
+stale observations, worktrees, operation metadata, dirty-file preservation and
+non-UTF-8 target names. UI tests cover confirmation binding, cancellation, busy
+controls, invalidation and failure handling. The smoke fixture also captures a
+read-only deletion review using `--panel branch-delete-review`; this developer
+scenario requires `--repository` and `--capture`, selects the first non-current
+branch and never sends the deletion action. The updated resting panel and
+confirmation have been captured and visually inspected on Linux using the
+software renderer at 960×640 and 1200×800. Interactive keyboard and complete
+end-to-end UI deletion checks remain outstanding.
 
 ## Commit history
 
@@ -302,8 +341,8 @@ existing output files and reports failure if the window closes before capture.
 Launch-time repository inspection is read-only and happens before window creation.
 Interactive repository operations continue to use worker threads.
 
-A repeatable offline fixture captures all six panels without touching a real
-project or contacting a remote:
+A repeatable offline fixture captures all six panels and a read-only branch
+deletion review without touching a real project or contacting a remote:
 
 ```sh
 cargo build --locked -p desktop-rust
@@ -382,8 +421,9 @@ if unattended availability is required.
 The preview now supports local initialization, stage/unstage, commit, and branch
 creation/switching.
 Clone, fetch, fast-forward pull, push and upstream setup are implemented as a
-prototype. Renaming the current committed branch is supported locally; branch
-deletion, renaming other selected branches and in-app authentication remain planned.
+prototype. Renaming the current committed branch and deleting merged local
+branches with confirmation are supported. Renaming other
+selected branches, force deletion and in-app authentication remain planned.
 Diff rendering is plain monospaced text; syntax highlighting, hunk selection,
 large-diff virtualization and interactive conflict resolution remain planned.
 Automated Git integration tests cover staged/unstaged changes, unborn branches,
