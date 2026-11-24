@@ -43,6 +43,7 @@ struct Desktop {
     description: String,
     notice: String,
     new_branch: String,
+    rename_branch: String,
     target_branch: Option<LocalBranch>,
     merge_preview: Option<MergePreview>,
     abort_merge_pending: bool,
@@ -95,6 +96,8 @@ enum Message {
     DescriptionChanged(String),
     Commit,
     BranchNameChanged(String),
+    RenameBranchNameChanged(String),
+    RenameCurrentBranch,
     BranchSelected(LocalBranch),
     CreateBranch,
     SwitchBranch,
@@ -146,6 +149,7 @@ enum Operation {
     ResolveConflict,
     Commit,
     CreateBranch,
+    RenameBranch,
     SwitchBranch,
     Remote,
     RemoteConfig(RemoteEdit),
@@ -407,6 +411,7 @@ impl Desktop {
                 self.summary.clear();
                 self.description.clear();
                 self.new_branch.clear();
+                self.rename_branch.clear();
                 self.target_branch = None;
                 self.select_remote(None);
                 self.remote_after_refresh = None;
@@ -446,6 +451,7 @@ impl Desktop {
                 self.clone_destination = value
             }
             Message::BranchNameChanged(value) if !self.loading => self.new_branch = value,
+            Message::RenameBranchNameChanged(value) if !self.loading => self.rename_branch = value,
             Message::BranchSelected(branch) if !self.loading => {
                 self.target_branch = Some(branch);
                 self.merge_preview = None;
@@ -628,6 +634,29 @@ impl Desktop {
                     return worker(
                         move || desktop_git::create_branch(&path, &name, &expected),
                         |result| Message::Wrote(Operation::CreateBranch, result),
+                    );
+                }
+            }
+            Message::RenameCurrentBranch if !self.loading && !self.rename_branch.is_empty() => {
+                if let Some(snapshot) = &self.snapshot {
+                    if snapshot.commit_basis.branch.is_none()
+                        || snapshot.commit_basis.head.is_none()
+                        || snapshot.commit_basis.merge_heads.is_some()
+                        || snapshot.commit_basis.rebase.is_some()
+                    {
+                        self.notice = String::from(
+                            "Select a committed local branch with no merge or rebase in progress",
+                        );
+                        return Task::none();
+                    }
+                    let path = snapshot.repository.path.clone();
+                    let expected = snapshot.commit_basis.clone();
+                    let name = self.rename_branch.clone();
+                    self.loading = true;
+                    self.notice = String::from("Renaming current branch…");
+                    return worker(
+                        move || desktop_git::rename_current_branch(&path, &name, &expected),
+                        |result| Message::Wrote(Operation::RenameBranch, result),
                     );
                 }
             }
@@ -945,6 +974,9 @@ impl Desktop {
                         if matches!(operation, Operation::SaveStash) {
                             self.stash_message.clear();
                         }
+                        if matches!(operation, Operation::RenameBranch) {
+                            self.rename_branch.clear();
+                        }
                         if matches!(operation, Operation::CreateBranch) {
                             self.new_branch.clear();
                         }
@@ -1260,6 +1292,7 @@ impl Desktop {
         self.summary.clear();
         self.description.clear();
         self.new_branch.clear();
+        self.rename_branch.clear();
         self.detail.clear();
         self.notice = notice.to_owned();
         self.loading = true;
@@ -1454,6 +1487,9 @@ mod tests {
         let mut app = loaded();
         app.loading = true;
         let _ = app.update(Message::BranchNameChanged(String::from("new")));
+        let _ = app.update(Message::RenameBranchNameChanged(String::from("renamed")));
+        let _ = app.update(Message::RenameCurrentBranch);
+        assert!(app.rename_branch.is_empty());
         let _ = app.update(Message::BranchSelected(target()));
         let _ = app.update(Message::CreateBranch);
         let _ = app.update(Message::SwitchBranch);
@@ -1467,8 +1503,11 @@ mod tests {
     fn path_edit_clears_branch_selection_and_prevents_branch_writes() {
         let mut app = loaded();
         app.new_branch = String::from("feature");
+        app.rename_branch = String::from("renamed");
         app.target_branch = Some(target());
         let _ = app.update(Message::PathChanged(String::from("/new")));
+        let _ = app.update(Message::RenameCurrentBranch);
+        assert!(app.rename_branch.is_empty());
         let _ = app.update(Message::CreateBranch);
         let _ = app.update(Message::SwitchBranch);
         assert!(app.new_branch.is_empty());
@@ -2444,5 +2483,71 @@ mod tests {
         assert!(app.show_history);
         assert!(app.loading);
         assert_eq!(app.summary, "Summary");
+    }
+    #[test]
+    fn failed_rename_preserves_drafts_and_refreshes_on_the_branches_panel() {
+        let mut app = loaded();
+        app.panel = Panel::Branches;
+        app.rename_branch = "renamed".into();
+        app.new_branch = "creation draft".into();
+        let _ = app.update(Message::Wrote(
+            Operation::RenameBranch,
+            Err("Destination exists".into()),
+        ));
+        assert!(app.loading);
+        assert_eq!(app.panel, Panel::Branches);
+        assert_eq!(app.rename_branch, "renamed");
+        assert_eq!(app.new_branch, "creation draft");
+        assert_eq!(app.summary, "Summary");
+        assert!(app.notice.contains("Destination exists"));
+    }
+
+    #[test]
+    fn successful_rename_clears_only_its_draft_and_old_write_previews() {
+        let mut app = loaded();
+        app.panel = Panel::Branches;
+        app.rename_branch = "renamed".into();
+        app.new_branch = "creation draft".into();
+        app.target_branch = Some(target());
+        app.merge_preview = Some(preview(MergeKind::CleanMerge));
+        app.rebase_preview = Some(reviewed_rebase());
+        let _ = app.update(Message::Wrote(
+            Operation::RenameBranch,
+            Ok("Renamed".into()),
+        ));
+        assert!(app.rename_branch.is_empty());
+        assert_eq!(app.new_branch, "creation draft");
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+        assert_eq!(app.panel, Panel::Branches);
+        assert!(app.merge_preview.is_none());
+        assert!(app.rebase_preview.is_none());
+        assert!(app.target_branch.is_none());
+    }
+
+    #[test]
+    fn unborn_detached_and_active_operations_cannot_start_a_rename() {
+        for state in ["unborn", "detached", "merge", "rebase"] {
+            let mut app = if state == "rebase" {
+                pending_rebase()
+            } else {
+                loaded()
+            };
+            let basis = &mut app.snapshot.as_mut().unwrap().commit_basis;
+            if state != "unborn" {
+                basis.head = Some(format!("{:040}", 1));
+            }
+            if state != "detached" {
+                basis.branch = Some("refs/heads/main".into());
+            }
+            if state == "merge" {
+                basis.merge_heads = Some(b"parent\n".to_vec());
+            }
+            app.rename_branch = "renamed".into();
+            let _ = app.update(Message::RenameCurrentBranch);
+            assert!(!app.loading, "{state}");
+            assert_eq!(app.rename_branch, "renamed");
+            assert!(app.notice.contains("committed local branch"));
+        }
     }
 }

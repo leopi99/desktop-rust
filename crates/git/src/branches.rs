@@ -114,6 +114,91 @@ pub fn switch_branch(
     Ok(format!("Switched to {}", selected.name.to_string_lossy()))
 }
 
+/// Rename the observed current local branch without overwriting another ref.
+/// Git moves its reflog and local branch configuration; index and files stay put.
+/// Unborn/detached HEAD and active sequencers require a different workflow.
+/// External clients can still race after these preflight checks.
+pub fn rename_current_branch(
+    path: &Path,
+    name: &str,
+    expected: &CommitBasis,
+) -> io::Result<String> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("Write lock poisoned"))?;
+    validate_name(path, name)?;
+    validate_basis(path, expected)?;
+    super::merge::ensure_idle(path)?;
+    let source = expected
+        .branch
+        .as_ref()
+        .and_then(|branch| branch.as_encoded_bytes().strip_prefix(b"refs/heads/"))
+        .filter(|branch| !branch.is_empty())
+        .ok_or_else(|| io::Error::other("Select a committed local branch before renaming"))?;
+    if expected.head.is_none() {
+        return Err(io::Error::other(
+            "Create the first commit before renaming this branch",
+        ));
+    }
+    if source == name.as_bytes()
+        || list(path)?
+            .iter()
+            .any(|branch| branch.name == OsStr::new(name))
+    {
+        return Err(io::Error::other(
+            "The destination branch already exists; choose a different name",
+        ));
+    }
+    // An orphan configuration section can still contain valuable tracking settings.
+    if read_bytes(path, &["config", "--local", "--null", "--list"])?
+        .split(|byte| *byte == 0)
+        .any(|entry| {
+            let key = entry
+                .split(|byte| *byte == b'\n')
+                .next()
+                .unwrap_or_default();
+            key.strip_prefix(b"branch.")
+                .and_then(|key| key.rsplitn(2, |byte| *byte == b'.').nth(1))
+                == Some(name.as_bytes())
+        })
+    {
+        return Err(io::Error::other(
+            "The destination already has branch configuration; choose another name",
+        ));
+    }
+    let full_ref = expected
+        .branch
+        .as_ref()
+        .expect("validated branch")
+        .as_encoded_bytes();
+    if read_bytes(path, &["worktree", "list", "--porcelain", "-z"])?
+        .split(|byte| *byte == 0)
+        .filter(|entry| entry.strip_prefix(b"branch ") == Some(full_ref))
+        .count()
+        > 1
+    {
+        return Err(io::Error::other(
+            "This branch is also checked out in another worktree",
+        ));
+    }
+    let source = file_path(source)?.into_os_string();
+    run_write(
+        path,
+        &[
+            OsStr::new("branch"),
+            OsStr::new("--move"),
+            OsStr::new("--"),
+            source.as_os_str(),
+            OsStr::new(name),
+        ],
+        None,
+    )?;
+    Ok(format!(
+        "Renamed {} to {name}. Remote branch names are unchanged.",
+        source.to_string_lossy()
+    ))
+}
+
 /// Validate a literal local branch name without expanding previous-checkout shorthand.
 pub(super) fn validate_name(path: &Path, name: &str) -> io::Result<()> {
     if name.is_empty() || name.starts_with('-') || name == "HEAD" {

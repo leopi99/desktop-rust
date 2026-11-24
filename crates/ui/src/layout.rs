@@ -150,6 +150,16 @@ impl Desktop {
             if !self.loading && !merging && !rebasing && !self.new_branch.is_empty() {
                 create = create.on_press(Message::CreateBranch);
             }
+            let mut rename = button("Rename current branch");
+            if !self.loading
+                && !merging
+                && !rebasing
+                && !self.rename_branch.is_empty()
+                && snapshot.commit_basis.branch.is_some()
+                && snapshot.commit_basis.head.is_some()
+            {
+                rename = rename.on_press(Message::RenameCurrentBranch);
+            }
             branch_controls = column![
                 text(current),
                 row![
@@ -170,6 +180,13 @@ impl Desktop {
                     create
                 ]
                 .spacing(8),
+                row![
+                    text_input("New name for the current branch", &self.rename_branch)
+                        .on_input(Message::RenameBranchNameChanged),
+                    rename
+                ]
+                .spacing(8),
+                text("Renaming is local. The remote branch keeps its existing name.").size(14),
             ]
             .spacing(8);
             if merging {
