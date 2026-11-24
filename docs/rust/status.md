@@ -20,7 +20,7 @@ All eight are merged. Independent prototype features do not imply release parity
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
 | UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario | Keyboard/focus/IME/HiDPI/accessibility and complete interactive flows. |
-| Engine | External Git version/error reports; Unix probe/history deadlines and capture caps, tested on Linux | Windows probe/history/process-tree bounds; broader adapter lifecycles; bundled Git/update/capability policy. |
+| Engine | External Git version/error reports; Unix probe/history/patch deadlines and capture caps, tested on Linux | Windows probe/history/patch/process-tree bounds; broader adapter lifecycles; bundled Git/update/capability policy. |
 | Upstream | Weekly discovery, ledger validator, daily watchdog; successful manual runs | Observe scheduled runs, complete initial baseline inventory and port applicable behavior. |
 | Delivery | Linux prototype builds and isolated fixture coverage | Packaging, signing, native account adapters and Windows/macOS release verification. |
 
@@ -36,6 +36,7 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - Unix version-probe limits and shared managed-child setup/termination, with Linux process, output and retry regressions in `ca5687095f`.
 - Unix historical-read deadlines, bounded complete metadata/file lists and streamed message/patch prefix capture in `5b24281183`, including late-error and multi-megabyte fixture coverage.
 - Shared fallible reader-pair startup and joining in `3e574c3f75`: child cleanup on thread-start failure, both workers awaited even on reader failure, and transfer inherited-pipe/retry regressions.
+- Tracked staged/unstaged patch limits in `52eb1e12b6`, reusing read-only capture and preserving full-file staging after a clipped preview.
 
 The batch is engineering groundwork, with no additional feature PR opened for
 each item. Keep commits independently reviewable and group compatible follow-up
@@ -43,18 +44,22 @@ work before the next milestone PR. The active branch stays `quality/rust-foundat
 for this reliability batch; continue from it rather than dropping its unmerged
 policy by starting again from `development`. Runtime/process hardening is in
 progress; broader adapter child-lifecycle work and UI handler separation remain
-coherent follow-ups. Default-branch CI activation follows the batch merge.
+coherent follow-ups. Complete repository scans (R-05) and local-write I/O (R-06)
+retain explicit legacy limitations; patch limits do not bound the preceding
+status read or every Git command. Default-branch CI activation follows the batch merge.
 
 ## Evidence and confidence
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 256 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 259 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
 file-count rejection and unchanged HEAD/index/working files; reader tests cover
-truncation boundaries, late failures, stderr overflow and deadlines. Record fresh
+truncation boundaries, late failures, stderr overflow and deadlines. Working-diff
+tests cover large staged/unstaged patches, unchanged data and complete staging
+after clipping, plus unborn/native-path cases. Record fresh
 results for later behavior changes; these counts are dated observations, not a
 permanent coverage guarantee.
 

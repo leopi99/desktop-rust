@@ -16,6 +16,15 @@ Rust-specific agent instructions are in [crates/AGENTS.md](../crates/AGENTS.md).
 Install a stable Rust toolchain and Git, then run `cargo run -p desktop-rust`.
 The preview opens a local repository and displays status and recent history.
 Select a changed file to inspect staged and working-tree differences separately.
+Tracked staged and unstaged patch previews each retain at most 256 KiB of raw
+output, with an explicit marker when clipped. On Unix each patch subprocess has
+a 30-second deadline and a 16 KiB stderr cap; excess stdout is drained/discarded,
+and the final exit status is checked before displaying the prefix. UTF-8
+replacement can enlarge the displayed byte size. This limits parent capture,
+not Git's own memory. Windows still buffers the full patch before clipping and
+has no equivalent patch deadline (PLAT-01). The preceding status/freshness read
+still uses legacy whole-output capture, so this is not a deadline for the entire
+`diff` operation. Selecting Stage still stages the complete current file.
 Untracked text files have a preview up to 1 MiB; binary files are identified,
 and symbolic links show their target rather than following it. Refresh reloads
 status and history. Paths retain their filesystem encoding on Unix.
@@ -123,6 +132,8 @@ joined before a reader panic or I/O error is returned. Transfers retain their
 cover inherited pipes after Git exits, timeout/cancellation and a subsequent retry.
 Other whole-output Git adapters still require lifecycle/resource review, and
 Windows still needs native process-tree/inherited-pipe cleanup (PLAT-01).
+The remaining read-scan and local-write work is tracked as R-05 and R-06 in
+[the backlog](rust/backlog.md).
 
 ## Git runtime diagnostics
 
