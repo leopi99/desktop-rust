@@ -9,6 +9,7 @@ pub(super) enum Event {
     BranchSelected(LocalBranch),
     CreateBranch,
     RenameCurrentBranch,
+    RenameSelectedBranch,
     RequestDeleteBranch,
     CancelDeleteBranch,
     DeleteBranch,
@@ -58,6 +59,38 @@ impl Desktop {
                     self.notice = String::from("Renaming current branch…");
                     return worker(
                         move || desktop_git::rename_current_branch(&path, &name, &expected),
+                        |result| Message::Wrote(Operation::RenameBranch, result),
+                    );
+                }
+            }
+            Event::RenameSelectedBranch
+                if !self.loading
+                    && self.panel == Panel::Branches
+                    && !self.rename_branch.is_empty() =>
+            {
+                if let (Some(snapshot), Some(branch)) = (&self.snapshot, &self.target_branch) {
+                    if snapshot.commit_basis.branch.is_none()
+                        || snapshot.commit_basis.head.is_none()
+                        || snapshot.commit_basis.merge_heads.is_some()
+                        || snapshot.commit_basis.rebase.is_some()
+                        || branch.is_current
+                        || !snapshot.branches.contains(branch)
+                    {
+                        self.notice = String::from("Select an observed non-current local branch with no merge or rebase in progress");
+                        return Task::none();
+                    }
+                    let path = snapshot.repository.path.clone();
+                    let expected = snapshot.commit_basis.clone();
+                    let branch = branch.clone();
+                    let name = self.rename_branch.clone();
+                    self.delete_branch_pending = None;
+                    self.loading = true;
+                    self.notice = format!(
+                        "Renaming selected branch: {}…",
+                        branch.name.to_string_lossy()
+                    );
+                    return worker(
+                        move || desktop_git::rename_local_branch(&path, &branch, &name, &expected),
                         |result| Message::Wrote(Operation::RenameBranch, result),
                     );
                 }
@@ -116,6 +149,7 @@ impl Desktop {
             | Event::RenameBranchNameChanged(..)
             | Event::BranchSelected(..)
             | Event::CreateBranch
+            | Event::RenameSelectedBranch
             | Event::RenameCurrentBranch
             | Event::RequestDeleteBranch
             | Event::DeleteBranch

@@ -156,8 +156,67 @@ pub fn rename_current_branch(
             "Create the first commit before renaming this branch",
         ));
     }
-    if source == name.as_bytes()
-        || list(path)?
+    let source = file_path(source)?.into_os_string();
+    let selected = list(path)?
+        .into_iter()
+        .find(|branch| branch.name == source)
+        .ok_or_else(|| io::Error::other("Current branch changed; refresh before renaming"))?;
+    rename_observed_branch(path, &selected, name, expected)
+}
+
+/// Rename an observed non-current local branch without switching to it.
+/// Git moves its reflog and local configuration; current HEAD, index and files
+/// stay put. Branches used by any worktree are refused. No force or remote write
+/// is performed; external clients can still race after preflight validation.
+///
+/// # Errors
+///
+/// Returns an error for stale source/target, invalid or occupied destinations,
+/// active operations, detached/unborn HEAD, worktree use or Git rejection.
+pub fn rename_local_branch(
+    path: &Path,
+    selected: &LocalBranch,
+    name: &str,
+    expected: &CommitBasis,
+) -> io::Result<String> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("Write lock poisoned"))?;
+    validate_name(path, name)?;
+    validate_basis(path, expected)?;
+    super::merge::ensure_idle(path)?;
+    let mut full_ref = std::ffi::OsString::from("refs/heads/");
+    full_ref.push(&selected.name);
+    if selected.is_current || expected.branch.as_ref() == Some(&full_ref) {
+        return Err(io::Error::other(
+            "Use current-branch rename for the current branch",
+        ));
+    }
+    rename_observed_branch(path, selected, name, expected)
+}
+
+fn rename_observed_branch(
+    path: &Path,
+    selected: &LocalBranch,
+    name: &str,
+    expected: &CommitBasis,
+) -> io::Result<String> {
+    if expected.head.is_none() || expected.branch.is_none() {
+        return Err(io::Error::other(
+            "Select a committed local branch before renaming",
+        ));
+    }
+    let branches = list(path)?;
+    if selected.name.as_encoded_bytes().starts_with(b"-")
+        || selected.name == OsStr::new("HEAD")
+        || !branches.contains(selected)
+    {
+        return Err(io::Error::other(
+            "The selected branch changed or was deleted; refresh before renaming",
+        ));
+    }
+    if selected.name == OsStr::new(name)
+        || branches
             .iter()
             .any(|branch| branch.name == OsStr::new(name))
     {
@@ -185,7 +244,10 @@ pub fn rename_current_branch(
             "The destination already has branch configuration; choose another name",
         ));
     }
-    let full_ref = branch.as_encoded_bytes();
+    let mut full_ref = std::ffi::OsString::from("refs/heads/");
+    full_ref.push(&selected.name);
+    let is_current = expected.branch.as_ref() == Some(&full_ref);
+    let full_ref = full_ref.as_encoded_bytes();
     if super::read_output::complete(
         path,
         &["worktree", "list", "--porcelain", "-z"],
@@ -194,27 +256,26 @@ pub fn rename_current_branch(
     .split(|byte| *byte == 0)
     .filter(|entry| entry.strip_prefix(b"branch ") == Some(full_ref))
     .count()
-        > 1
+        > usize::from(is_current)
     {
         return Err(io::Error::other(
             "This branch is also checked out in another worktree",
         ));
     }
-    let source = file_path(source)?.into_os_string();
     run_write(
         path,
         &[
             OsStr::new("branch"),
             OsStr::new("--move"),
             OsStr::new("--"),
-            source.as_os_str(),
+            selected.name.as_os_str(),
             OsStr::new(name),
         ],
         None,
     )?;
     Ok(format!(
         "Renamed {} to {name}. Remote branch names are unchanged.",
-        source.to_string_lossy()
+        selected.name.to_string_lossy()
     ))
 }
 

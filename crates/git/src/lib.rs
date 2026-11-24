@@ -23,7 +23,9 @@ pub use rebase::{abort_rebase, continue_rebase, execute_rebase, preview_rebase};
 mod stash;
 pub use stash::{apply_stash, save_stash};
 mod transfer;
-pub use branches::{create_branch, delete_local_branch, rename_current_branch, switch_branch};
+pub use branches::{
+    create_branch, delete_local_branch, rename_current_branch, rename_local_branch, switch_branch,
+};
 use desktop_core::{CommitBasis, FileChange, FileDiff, Repository, RepositorySnapshot};
 pub use remotes::{
     add_remote, clone_repository, clone_repository_with_control, remote_operation,

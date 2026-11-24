@@ -114,6 +114,7 @@ enum Message {
     BranchNameChanged(String),
     RenameBranchNameChanged(String),
     RenameCurrentBranch,
+    RenameSelectedBranch,
     RequestDeleteBranch,
     CancelDeleteBranch,
     DeleteBranch,
@@ -511,6 +512,7 @@ mod tests {
         let _ = app.update(Message::BranchNameChanged(String::from("new")));
         let _ = app.update(Message::RenameBranchNameChanged(String::from("renamed")));
         let _ = app.update(Message::RenameCurrentBranch);
+        let _ = app.update(Message::RenameSelectedBranch);
         assert!(app.rename_branch.is_empty());
         let _ = app.update(Message::BranchSelected(target()));
         let _ = app.update(Message::CreateBranch);
@@ -529,6 +531,7 @@ mod tests {
         app.target_branch = Some(target());
         let _ = app.update(Message::PathChanged(String::from("/new")));
         let _ = app.update(Message::RenameCurrentBranch);
+        let _ = app.update(Message::RenameSelectedBranch);
         assert!(app.rename_branch.is_empty());
         let _ = app.update(Message::CreateBranch);
         let _ = app.update(Message::SwitchBranch);
@@ -1572,6 +1575,61 @@ mod tests {
             assert!(app.notice.contains("committed local branch"));
         }
     }
+    #[test]
+    fn selected_rename_starts_without_switching_and_preserves_other_drafts() {
+        let mut app = delete_app();
+        app.rename_branch = "new-topic".into();
+        app.new_branch = "creation draft".into();
+        app.delete_branch_pending = app.target_branch.clone();
+        let _ = app.update(Message::RenameSelectedBranch);
+        assert!(app.loading);
+        assert_eq!(app.panel, Panel::Branches);
+        assert!(app.notice.contains("selected branch"));
+        assert!(app.delete_branch_pending.is_none());
+        assert_eq!(app.rename_branch, "new-topic");
+        assert_eq!(app.new_branch, "creation draft");
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+        let _ = app.update(Message::RenameBranchNameChanged("redirect".into()));
+        let _ = app.update(Message::BranchSelected(target()));
+        let _ = app.update(Message::RenameSelectedBranch);
+        assert_eq!(app.rename_branch, "new-topic");
+        assert!(app.loading);
+    }
+
+    #[test]
+    fn selected_rename_needs_an_observed_non_current_branch_and_an_idle_branches_panel() {
+        for state in [
+            "missing", "current", "stale", "empty", "panel", "busy", "merge", "rebase", "detached",
+            "unborn",
+        ] {
+            let mut app = delete_app();
+            app.rename_branch = "renamed".into();
+            match state {
+                "missing" => app.target_branch = None,
+                "current" => app.target_branch.as_mut().unwrap().is_current = true,
+                "stale" => app.snapshot.as_mut().unwrap().branches.clear(),
+                "empty" => app.rename_branch.clear(),
+                "panel" => app.panel = Panel::Changes,
+                "busy" => app.loading = true,
+                "merge" => {
+                    app.snapshot.as_mut().unwrap().commit_basis.merge_heads =
+                        Some(b"parent".to_vec())
+                }
+                "rebase" => {
+                    app.snapshot.as_mut().unwrap().commit_basis.rebase =
+                        pending_rebase().snapshot.unwrap().commit_basis.rebase
+                }
+                "detached" => app.snapshot.as_mut().unwrap().commit_basis.branch = None,
+                _ => app.snapshot.as_mut().unwrap().commit_basis.head = None,
+            }
+            let _ = app.update(Message::RenameSelectedBranch);
+            assert_eq!(app.loading, state == "busy", "{state}");
+            assert_eq!(app.summary, "Summary");
+            assert_eq!(app.description, "Details");
+        }
+    }
+
     fn delete_app() -> Desktop {
         let mut app = loaded();
         app.panel = Panel::Branches;

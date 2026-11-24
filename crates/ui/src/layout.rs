@@ -212,6 +212,20 @@ impl Desktop {
             {
                 rename = rename.on_press(Message::RenameCurrentBranch);
             }
+            let mut rename_selected = button("Rename selected branch");
+            if !self.loading
+                && !merging
+                && !rebasing
+                && !self.rename_branch.is_empty()
+                && snapshot.commit_basis.branch.is_some()
+                && snapshot.commit_basis.head.is_some()
+                && self
+                    .target_branch
+                    .as_ref()
+                    .is_some_and(|branch| !branch.is_current && snapshot.branches.contains(branch))
+            {
+                rename_selected = rename_selected.on_press(Message::RenameSelectedBranch);
+            }
             let mut delete = button("Delete selected branch…").style(button::danger);
             if !self.loading
                 && !merging
@@ -248,9 +262,10 @@ impl Desktop {
                 .spacing(6)
                 .width(Length::Fill),
                 column![
-                    text_input("New name for the current branch", &self.rename_branch)
+                    text_input("New local branch name", &self.rename_branch)
                         .on_input(Message::RenameBranchNameChanged),
-                    rename
+                    rename,
+                    rename_selected
                 ]
                 .spacing(6)
                 .width(Length::Fill),

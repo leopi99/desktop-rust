@@ -1,7 +1,7 @@
 //! Git integration coverage for branch rename.
 #![cfg(test)]
 
-use desktop_git::{rename_current_branch, snapshot};
+use desktop_git::{rename_current_branch, rename_local_branch, snapshot};
 use std::{
     ffi::OsStr,
     path::PathBuf,
@@ -337,4 +337,190 @@ fn oversized_local_config_refuses_rename_and_allows_retry_after_fixture_repair()
         snapshot(&repo.path).unwrap().commit_basis.branch.unwrap(),
         "refs/heads/renamed"
     );
+}
+
+fn selected(repo: &Fixture, name: &OsStr) -> desktop_core::LocalBranch {
+    snapshot(&repo.path)
+        .unwrap()
+        .branches
+        .into_iter()
+        .find(|branch| branch.name == name)
+        .unwrap()
+}
+
+#[test]
+fn selected_rename_preserves_current_state_and_moves_only_target_tracking_and_reflog() {
+    let repo = Fixture::new();
+    repo.commit();
+    repo.git(&["branch", "topic"]);
+    let target = selected(&repo, OsStr::new("topic"));
+    repo.git(&["commit", "--allow-empty", "-m", "main only"]);
+    repo.git(&["config", "branch.topic.remote", "origin"]);
+    repo.git(&["config", "branch.topic.merge", "refs/heads/topic"]);
+    repo.git(&["update-ref", "refs/remotes/origin/topic", &target.oid]);
+    std::fs::write(repo.path.join("file.txt"), b"staged\n").unwrap();
+    repo.git(&["add", "file.txt"]);
+    std::fs::write(repo.path.join("file.txt"), b"unstaged\n").unwrap();
+    std::fs::write(repo.path.join("untracked"), b"keep\n").unwrap();
+    let before = snapshot(&repo.path).unwrap();
+    rename_local_branch(&repo.path, &target, "feature/nuovo-è", &before.commit_basis).unwrap();
+    let after = snapshot(&repo.path).unwrap();
+    assert_eq!(after.commit_basis, before.commit_basis);
+    assert_eq!(after.changes, before.changes);
+    assert!(!after.branches.iter().any(|branch| branch.name == "topic"));
+    assert_eq!(
+        selected(&repo, OsStr::new("feature/nuovo-è")).oid,
+        target.oid
+    );
+    assert_eq!(
+        repo.git(&["config", "branch.feature/nuovo-è.remote"]),
+        b"origin\n"
+    );
+    assert_eq!(
+        repo.git(&["config", "branch.feature/nuovo-è.merge"]),
+        b"refs/heads/topic\n"
+    );
+    assert_eq!(
+        repo.git(&["rev-parse", "refs/remotes/origin/topic"]),
+        format!("{}\n", target.oid).as_bytes()
+    );
+    let reflog = repo.git(&["reflog", "show", "--format=%gs", "feature/nuovo-è"]);
+    assert!(String::from_utf8_lossy(&reflog).contains("branch: Created from main"));
+    assert_eq!(
+        std::fs::read(repo.path.join("file.txt")).unwrap(),
+        b"unstaged\n"
+    );
+    assert_eq!(
+        std::fs::read(repo.path.join("untracked")).unwrap(),
+        b"keep\n"
+    );
+}
+
+#[test]
+fn selected_rename_rejects_moved_deleted_current_or_stale_observations() {
+    for mutation in ["moved", "deleted", "flag", "current", "index"] {
+        let repo = Fixture::new();
+        repo.commit();
+        repo.git(&["branch", "topic"]);
+        let mut target = selected(&repo, OsStr::new("topic"));
+        let basis = snapshot(&repo.path).unwrap().commit_basis;
+        match mutation {
+            "moved" => {
+                repo.git(&["commit", "--allow-empty", "-m", "advance"]);
+                repo.git(&["branch", "--force", "topic", "HEAD"]);
+            }
+            "deleted" => {
+                repo.git(&["branch", "--delete", "topic"]);
+            }
+            "flag" => target.is_current = true,
+            "current" => {
+                target = selected(&repo, OsStr::new("main"));
+                target.is_current = false;
+            }
+            _ => {
+                std::fs::write(repo.path.join("extra"), b"staged").unwrap();
+                repo.git(&["add", "extra"]);
+            }
+        }
+        let before = repo.unchanged_state();
+        assert!(
+            rename_local_branch(&repo.path, &target, "renamed", &basis).is_err(),
+            "{mutation}"
+        );
+        assert_eq!(repo.unchanged_state(), before);
+    }
+}
+
+#[test]
+fn selected_rename_rejects_occupied_invalid_and_orphan_config_destinations() {
+    let repo = Fixture::new();
+    repo.commit();
+    repo.git(&["branch", "topic"]);
+    repo.git(&["branch", "occupied"]);
+    repo.git(&["config", "branch.orphan.description", "saved setting"]);
+    let target = selected(&repo, OsStr::new("topic"));
+    let basis = snapshot(&repo.path).unwrap().commit_basis;
+    let before = repo.unchanged_state();
+    for name in [
+        "topic",
+        "occupied",
+        "orphan",
+        "",
+        "-M",
+        "HEAD",
+        "@{-1}",
+        "bad..name",
+        "with space",
+    ] {
+        assert!(
+            rename_local_branch(&repo.path, &target, name, &basis).is_err(),
+            "{name}"
+        );
+        assert_eq!(repo.unchanged_state(), before);
+    }
+}
+
+#[test]
+fn selected_rename_never_changes_a_branch_checked_out_in_another_worktree() {
+    let repo = Fixture::new();
+    repo.commit();
+    repo.git(&["branch", "topic"]);
+    let linked = repo.root.join("linked");
+    repo.git(&["worktree", "add", linked.to_str().unwrap(), "topic"]);
+    let target = selected(&repo, OsStr::new("topic"));
+    let basis = snapshot(&repo.path).unwrap().commit_basis;
+    let linked_basis = snapshot(&linked).unwrap().commit_basis;
+    let before = repo.unchanged_state();
+    assert!(rename_local_branch(&repo.path, &target, "renamed", &basis).is_err());
+    assert_eq!(repo.unchanged_state(), before);
+    assert_eq!(snapshot(&linked).unwrap().commit_basis, linked_basis);
+}
+
+#[test]
+fn selected_rename_is_blocked_by_active_sequencers_and_detached_head() {
+    for marker in [
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "sequencer",
+        "rebase-merge",
+        "detached",
+    ] {
+        let repo = Fixture::new();
+        repo.commit();
+        repo.git(&["branch", "topic"]);
+        if marker == "detached" {
+            repo.git(&["switch", "--detach"]);
+        } else if marker.ends_with("HEAD") {
+            std::fs::write(
+                repo.path.join(".git").join(marker),
+                repo.git(&["rev-parse", "HEAD"]),
+            )
+            .unwrap();
+        } else {
+            std::fs::create_dir(repo.path.join(".git").join(marker)).unwrap();
+        }
+        let target = selected(&repo, OsStr::new("topic"));
+        let basis = snapshot(&repo.path).unwrap().commit_basis;
+        let before = repo.unchanged_state();
+        assert!(
+            rename_local_branch(&repo.path, &target, "renamed", &basis).is_err(),
+            "{marker}"
+        );
+        assert_eq!(repo.unchanged_state(), before);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn selected_rename_uses_the_complete_native_source_name() {
+    use std::os::unix::ffi::OsStrExt;
+    let repo = Fixture::new();
+    repo.commit();
+    let name = OsStr::from_bytes(b"topic-\xff");
+    repo.git(&[OsStr::new("branch"), name]);
+    let target = selected(&repo, name);
+    let basis = snapshot(&repo.path).unwrap().commit_basis;
+    rename_local_branch(&repo.path, &target, "renamed", &basis).unwrap();
+    assert_eq!(snapshot(&repo.path).unwrap().commit_basis, basis);
+    assert_eq!(selected(&repo, OsStr::new("renamed")).oid, target.oid);
 }

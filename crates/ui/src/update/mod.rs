@@ -95,6 +95,9 @@ impl Desktop {
             Message::RenameBranchNameChanged(value) => {
                 self.update_branches(branches::Event::RenameBranchNameChanged(value))
             }
+            Message::RenameSelectedBranch => {
+                self.update_branches(branches::Event::RenameSelectedBranch)
+            }
             Message::RenameCurrentBranch => {
                 self.update_branches(branches::Event::RenameCurrentBranch)
             }
