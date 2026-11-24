@@ -1,4 +1,4 @@
-//! Fail-closed bounded capture for short read-only Unix commands.
+//! Bounded complete/prefix capture for read-only Unix commands.
 use std::{
     io::{self, Read},
     process::{Command, Output},
@@ -23,7 +23,25 @@ struct Capture {
     exceeded: bool,
 }
 
-fn drain(mut pipe: impl Read, limit: usize, overflow: &AtomicBool) -> io::Result<Capture> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverflowPolicy {
+    Reject,
+    Prefix,
+}
+
+/// Raw child output plus an explicit indication of a clipped stdout prefix.
+#[derive(Debug)]
+pub(crate) struct PrefixOutput {
+    pub(crate) output: Output,
+    pub(crate) stdout_truncated: bool,
+}
+
+fn drain(
+    mut pipe: impl Read,
+    limit: usize,
+    overflow: &AtomicBool,
+    policy: OverflowPolicy,
+) -> io::Result<Capture> {
     let mut capture = Capture {
         bytes: Vec::with_capacity(limit.min(4096)),
         exceeded: false,
@@ -41,7 +59,9 @@ fn drain(mut pipe: impl Read, limit: usize, overflow: &AtomicBool) -> io::Result
         capture.bytes.extend_from_slice(&chunk[..keep]);
         if keep < count {
             capture.exceeded = true;
-            overflow.store(true, Ordering::Release);
+            if policy == OverflowPolicy::Reject {
+                overflow.store(true, Ordering::Release);
+            }
         }
         // Keep draining until the controller stops the child; never grow the capture.
     }
@@ -56,7 +76,21 @@ fn limit_error() -> io::Error {
 
 /// Capture raw output, failing rather than accepting a truncated successful report.
 /// Deadline monitoring continues after direct-child exit while inherited pipes remain open.
-pub(crate) fn bounded_output(mut command: Command, limits: OutputLimits) -> io::Result<Output> {
+pub(crate) fn bounded_output(command: Command, limits: OutputLimits) -> io::Result<Output> {
+    capture_output(command, limits, OverflowPolicy::Reject).map(|capture| capture.output)
+}
+
+/// Retain a bounded stdout prefix but drain the rest through EOF. Nonzero exit
+/// status remains visible to the caller; stderr overflow and deadline still fail.
+pub(crate) fn prefix_output(command: Command, limits: OutputLimits) -> io::Result<PrefixOutput> {
+    capture_output(command, limits, OverflowPolicy::Prefix)
+}
+
+fn capture_output(
+    mut command: Command,
+    limits: OutputLimits,
+    policy: OverflowPolicy,
+) -> io::Result<PrefixOutput> {
     let started = Instant::now();
     let mut child = super::spawn(&mut command)?;
     let Some(stdout) = child.take_stdout() else {
@@ -71,8 +105,8 @@ pub(crate) fn bounded_output(mut command: Command, limits: OutputLimits) -> io::
     let out_overflow = overflow.clone();
     let err_overflow = overflow.clone();
     let out = match thread::Builder::new()
-        .name("git-probe-stdout".into())
-        .spawn(move || drain(stdout, limits.stdout, &out_overflow))
+        .name("git-output-stdout".into())
+        .spawn(move || drain(stdout, limits.stdout, &out_overflow, policy))
     {
         Ok(reader) => reader,
         Err(error) => {
@@ -81,8 +115,8 @@ pub(crate) fn bounded_output(mut command: Command, limits: OutputLimits) -> io::
         }
     };
     let err = match thread::Builder::new()
-        .name("git-probe-stderr".into())
-        .spawn(move || drain(stderr, limits.stderr, &err_overflow))
+        .name("git-output-stderr".into())
+        .spawn(move || drain(stderr, limits.stderr, &err_overflow, OverflowPolicy::Reject))
     {
         Ok(reader) => reader,
         Err(error) => {
@@ -131,13 +165,16 @@ pub(crate) fn bounded_output(mut command: Command, limits: OutputLimits) -> io::
     let stdout = stdout??;
     let stderr = stderr??;
     // Catch overflow even when a short-lived command exits between controller polls.
-    if stdout.exceeded || stderr.exceeded {
+    if (stdout.exceeded && policy == OverflowPolicy::Reject) || stderr.exceeded {
         return Err(limit_error());
     }
-    Ok(Output {
-        status,
-        stdout: stdout.bytes,
-        stderr: stderr.bytes,
+    Ok(PrefixOutput {
+        stdout_truncated: stdout.exceeded,
+        output: Output {
+            status,
+            stdout: stdout.bytes,
+            stderr: stderr.bytes,
+        },
     })
 }
 
@@ -199,7 +236,13 @@ mod tests {
     #[test]
     fn drain_does_not_retain_a_large_input_stream() {
         let overflow = AtomicBool::new(false);
-        let captured = drain(io::repeat(42).take(16 * 1024 * 1024), 512, &overflow).unwrap();
+        let captured = drain(
+            io::repeat(42).take(16 * 1024 * 1024),
+            512,
+            &overflow,
+            OverflowPolicy::Reject,
+        )
+        .unwrap();
         assert_eq!(captured.bytes, vec![42; 512]);
         assert!(captured.exceeded);
         assert!(overflow.load(Ordering::Acquire));
@@ -267,5 +310,50 @@ mod tests {
                 Err(error) => assert_eq!(error.kind(), io::ErrorKind::NotFound),
             }
         }
+    }
+    #[test]
+    fn prefix_capture_retains_only_the_prefix_and_observes_the_final_exit() {
+        for exit in ["0", "7"] {
+            let mut command = Command::new("sh");
+            command.args([
+                "-c",
+                "head -c 100000 /dev/zero; printf 'finished' >&2; exit \"$1\"",
+                "fixture",
+                exit,
+            ]);
+            let captured = prefix_output(command, limits()).unwrap();
+            assert_eq!(captured.output.stdout, vec![0; 512]);
+            assert!(captured.stdout_truncated);
+            assert_eq!(captured.output.status.code(), Some(exit.parse().unwrap()));
+            assert_eq!(captured.output.stderr, b"finished");
+        }
+    }
+
+    #[test]
+    fn prefix_capture_marks_exact_boundary_without_false_truncation() {
+        let captured = prefix_output(shell("head -c 512 /dev/zero"), limits()).unwrap();
+        assert_eq!(captured.output.stdout.len(), 512);
+        assert!(!captured.stdout_truncated);
+    }
+
+    #[test]
+    fn prefix_capture_still_rejects_stderr_overflow_and_stalls() {
+        assert_eq!(
+            prefix_output(
+                shell("head -c 100000 /dev/zero; head -c 1025 /dev/zero >&2"),
+                limits()
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::InvalidData
+        );
+        let mut policy = limits();
+        policy.timeout = Duration::from_millis(100);
+        assert_eq!(
+            prefix_output(shell("head -c 10000 /dev/zero; sleep 30"), policy)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
     }
 }

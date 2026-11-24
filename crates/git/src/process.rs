@@ -10,7 +10,7 @@ use std::{thread, time::Duration};
 #[cfg(unix)]
 mod bounded;
 #[cfg(unix)]
-pub(crate) use bounded::{bounded_output, OutputLimits};
+pub(crate) use bounded::{bounded_output, prefix_output, OutputLimits, PrefixOutput};
 
 /// A child created by this module; on Unix its private constructor binds group
 /// cleanup to isolation setup instead of accepting arbitrary Child handles.
