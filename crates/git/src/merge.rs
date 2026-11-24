@@ -130,17 +130,17 @@ fn build_preview(
         return Ok(preview);
     }
     require_common_ancestor(&preview.repository.path, head, &target.oid)?;
-    let output = git_command(&preview.repository.path)
-        .args([
-            "merge-tree",
-            "--write-tree",
-            "--name-only",
-            "--no-messages",
-            "-z",
-            head,
-            &target.oid,
-        ])
-        .output()?;
+    let mut command = git_command(&preview.repository.path);
+    command.args([
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "--no-messages",
+        "-z",
+        head,
+        &target.oid,
+    ]);
+    let output = super::process::complete_write_output(command, 4 * 1024 * 1024, 64 * 1024)?;
     if !matches!(output.status.code(), Some(0 | 1)) {
         return Err(io::Error::other(
             String::from_utf8_lossy(&output.stderr).into_owned(),

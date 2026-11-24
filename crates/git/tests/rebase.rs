@@ -633,3 +633,31 @@ fn combined_rebase_path_budget_rejects_many_individually_small_reads() {
     assert!(!f.repo.join("virtual").exists());
     assert!(!f.repo.join(".git/rebase-merge").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn noisy_driver_diagnostics_stay_bounded_while_rebase_pauses_and_aborts() {
+    let f = Fixture::new();
+    f.conflict();
+    std::fs::write(f.repo.join(".git/info/attributes"), b"base merge=noisy\n").unwrap();
+    git(&f.repo, &["config", "merge.noisy.driver", "head -c 100000 /dev/zero; head -c 100000 /dev/zero >&2; printf 'driver diagnostic tail' >&2; exit 1"]);
+    let before = f.basis();
+    let output = desktop_git::execute_rebase(&f.preview()).unwrap();
+    assert!(output.starts_with("Rebase paused."));
+    assert!(output.contains("earlier output truncated"));
+    assert!(output.contains("driver diagnostic tail"));
+    assert!(output.len() < 2 * 64 * 1024 + 300);
+    let paused = f.basis();
+    assert!(paused.rebase.is_some());
+    assert!(desktop_git::snapshot(&f.repo)
+        .unwrap()
+        .changes
+        .iter()
+        .any(|change| change.is_conflicted()));
+    assert_eq!(
+        desktop_git::abort_rebase(&f.repo, &paused).unwrap(),
+        "Rebase aborted"
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), b"local side\n");
+}

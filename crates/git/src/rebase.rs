@@ -3,7 +3,7 @@ use super::{commit_basis, file_path, git_command, merge, snapshot, WRITE_LOCK};
 use desktop_core::{
     CommitBasis, LocalBranch, RebaseCommit, RebaseKind, RebasePreview, RebaseState,
 };
-use std::{collections::HashSet, io, path::Path, process::Stdio};
+use std::{collections::HashSet, io, path::Path};
 
 const COMMIT_LIMIT: usize = 1000;
 const PATH_BYTES_LIMIT: usize = 8 * 1024 * 1024;
@@ -330,17 +330,13 @@ fn check_collisions(root: &Path, trees: &[String], commits: &[String]) -> io::Re
 }
 
 fn run(root: &Path, args: &[&str]) -> io::Result<String> {
-    let output = git_command(root)
+    let mut command = git_command(root);
+    command
         .args(args)
         .env("GIT_EDITOR", ":")
-        .env("GIT_SEQUENCE_EDITOR", ":")
-        .stdin(Stdio::null())
-        .output()?;
-    let diagnostics = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+        .env("GIT_SEQUENCE_EDITOR", ":");
+    let output = super::process::diagnostic_output(command)?;
+    let diagnostics = output.diagnostics();
     if state(root)?.is_some() {
         if args.contains(&"--abort") {
             return Err(io::Error::other(diagnostics));

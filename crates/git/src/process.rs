@@ -8,7 +8,7 @@ use std::{
 use std::{thread, time::Duration};
 
 mod write;
-pub(super) use write::write_output;
+pub(super) use write::{complete_write_output, diagnostic_output, write_output};
 
 mod readers;
 pub(super) use readers::Readers;
