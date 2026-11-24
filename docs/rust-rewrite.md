@@ -172,9 +172,12 @@ operation-wide deadline; filesystem collision checks have no separate deadline.
 Conflict attributes and rebase preflight queries now use bounded complete reads.
 Shared ancestry queries require empty stdout and accept only a quiet exit 1 for
 non-ancestry; common-base output must contain a full object ID. The generic
-whole-output reader has been removed. The two remaining Unix whole-output paths
-are the object-writing merge-tree preview and the rebase mutation runner (R-06);
-Windows retains explicit unbounded-capture fallbacks.
+whole-output reader has been removed. Merge-tree now retains complete raw output
+within 4 MiB stdout and 64 KiB stderr; overflow fails after draining and joining,
+without parsing a prefix or interrupting a configured driver. This object-writing
+preview has no automatic deadline. Rebase uses marked 64 KiB per-stream diagnostic
+tails, preserving final exit status and paused-state detection. Windows retains
+explicit unbounded-capture fallbacks for read-only commands and the runtime probe.
 
 ## Git pipe-reader lifecycle
 
@@ -185,9 +188,9 @@ managed child and waits for any started reader. At completion both workers are
 joined before a reader panic or I/O error is returned. Transfers retain their
 64 KiB per-stream diagnostic tails and 16 KiB live progress limit. Linux tests
 cover inherited pipes after Git exits, timeout/cancellation and a subsequent retry.
-Other whole-output Git adapters still require lifecycle/resource review, and
-Windows still needs native process-tree/inherited-pipe cleanup (PLAT-01).
-The remaining read-scan and local-write work is tracked as R-05 and R-06 in
+Every Unix Git subprocess now uses the shared child/reader lifecycle. Windows
+still needs native process-tree/inherited-pipe cleanup and bounded read/probe
+fallbacks (PLAT-01). Remaining stalled-write policy is tracked as R-06 in
 [the backlog](rust/backlog.md).
 
 The shared local-write runner starts both output readers before feeding a commit
@@ -203,10 +206,15 @@ No automatic timeout or cancellation is imposed on local-write hooks/signing.
 A stalled child or inherited pipe can still keep the operation busy; interruption
 and recovery policy remains pending. I/O/setup errors do not promise rollback of
 an already started Git command. Existing freshness checks and repository refresh
-remain necessary. Bespoke merge/rebase runners still have whole-output capture
-and are outside this migrated path. Linux tests use real noisy hooks, large
+remain necessary. Merge-tree and rebase now share the same lifecycle with
+complete-protocol and diagnostic-tail policies respectively. Linux tests use real noisy hooks, large
 messages and staged/unstaged files, and verify retry after a rejected hook. The
 Linux pipe-deadlock regression uses coreutils `timeout` to bound the test itself.
+Additional regressions verify complete raw protocol bytes at exact limits, final
+exit status, overflow on either stream only after child completion, and successful
+retry. A noisy real merge driver makes preview fail without changing HEAD, index
+or working files; a noisy rebase driver still produces a supported paused state
+that can be aborted back to the original branch and contents.
 
 ## Git runtime diagnostics
 
