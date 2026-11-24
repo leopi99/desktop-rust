@@ -33,7 +33,11 @@ provides visibility into the external-engine policy; it does not install Git,
 pin a binary, enforce an approved version, or prove behavior/security compatibility.
 Vendor and development version suffixes are retained instead of guessed away.
 Later operations resolve Git again, so PATH or executable changes can invalidate
-the observation. Packaging and a supported-version/capability policy need separate work.
+the observation. On Unix, the diagnostic now enforces a five-second deadline and
+512/1024-byte stdout/stderr caps with process-group cleanup; it is tested on Linux.
+Windows equivalent bounds remain pending native process-tree/pipe cancellation.
+These resource safeguards do not change the deferred bundled-engine disposition.
+Packaging and a supported-version/capability policy need separate work.
 
 ## Still required for the initial baseline
 

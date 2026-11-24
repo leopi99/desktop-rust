@@ -126,12 +126,22 @@ The preview uses externally installed Git; it does not package or update Git and
 does not infer compatibility or security from the reported version. Later commands
 resolve the executable again, so a PATH/binary change can invalidate the observation.
 The diagnostic is not a prerequisite or capability gate for repository commands.
+On Unix the probe has a five-second deadline with bounded 512-byte stdout and
+1024-byte stderr capture. Oversized output fails instead of being accepted as a
+truncated version; raw bytes are validated before display. A timeout terminates
+the isolated process group, waits for the direct child and joins both readers
+before retry becomes available. Cleanup includes a short termination grace period.
+This Unix implementation is tested on Linux; the Windows fallback still buffers
+output and requires native process-tree/pipe handling before equivalent bounds
+can be enabled there.
 See [the first baseline triage](upstream/release-3.6.11.md) for the distinction
 between upstream's Git 2.56.1 bundle and the current Rust engine policy.
 
 Capture the diagnostic with `--panel git`. The offline smoke fixture includes that
-panel and a separate no-repository capture with Git absent from PATH, in addition
-to the existing panels and read-only deletion review. Both diagnostic states
+panel and no-repository captures with Git absent from PATH, plus Unix stalled/noisy
+Git shims, in addition to the existing panels and read-only deletion review. The
+timeout and overflow states were also visually inspected at both window sizes.
+The available/missing diagnostic states
 were captured and visually inspected on Linux/software rendering at 960×640 and
 1200×800 on 2026-11-24; the fixture files, refs, index and config were unchanged.
 Interactive keyboard and accessibility checks remain outstanding.
@@ -372,8 +382,8 @@ Launch-time repository inspection is read-only and happens before window creatio
 Interactive repository operations continue to use worker threads.
 
 A repeatable offline fixture captures all seven panels, a read-only branch
-deletion review and missing-Git diagnostics without touching a real project
-or contacting a remote:
+deletion review, missing-Git diagnostics and Unix timeout/output-overflow cases
+without touching a real project or contacting a remote:
 
 ```sh
 cargo build --locked -p desktop-rust

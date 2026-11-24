@@ -28,12 +28,12 @@ repository PR skill; a batch is not permission to merge or waive review.
 
 ## Next increment in the active batch: runtime and process hardening
 
-| ID | Priority | Outcome and acceptance |
-| --- | --- | --- |
-| R-01 | High | Give the startup/version probe a finite deadline and bounded captured output; test a stalled and a noisy executable, retry and clean termination. The current probe runs off the UI thread but buffers output and has no separate deadline. |
-| R-02 | High | Define resource bounds for historical Git output before preview truncation; test large messages/diffs and bounded memory behavior. |
-| R-03 | High | Consolidate common child-process cleanup/error handling without weakening Git argument boundaries or transfer cancellation; preserve all existing fixture behavior. |
-| A-01 | Medium | Split the large UI update handler into cohesive domain handlers while keeping write guards, draft retention and review invalidation covered by existing state tests. |
+| ID | Priority | Status | Outcome and acceptance |
+| --- | --- | --- | --- |
+| R-01 | High | Done locally on Unix; verified on Linux | [ca5687095f](https://github.com/leopi99/desktop-rust/commit/ca5687095f945e896fb1d0d7f5c6d54078aa04ff): five-second probe deadline, 512/1024-byte stdout/stderr caps, fail-closed overflow and joined readers. Tests cover stalled/noisy commands, inherited pipes, process/helper termination and retry. Windows remains covered by PLAT-01. |
+| R-02 | High | Todo | Define resource bounds for historical Git output before preview truncation; test large messages/diffs and bounded memory behavior. |
+| R-03 | High | In progress | Shared child setup/termination and an opaque managed-child type now serve transfers and Unix probes. Broader Git adapters and their reader/error lifecycles still need review; retain argument boundaries, transfer tail diagnostics and cancellation behavior. |
+| A-01 | Medium | Todo | Split the large UI update handler into cohesive domain handlers while keeping write guards, draft retention and review invalidation covered by existing state tests. |
 
 Continue from the active `quality/rust-foundations` branch for the next compatible
 hardening increments, keeping commits independently reviewable. Review process
@@ -71,7 +71,7 @@ or API failures to produce a healthy report.
 | AUTH-01 | High before remote alpha | Specify in-app authentication/account flows, OS credential storage, SSH behavior and Enterprise scope; no embedded secrets or silent import of original app databases. |
 | DIST-01 | High before packaging | Decide system-versus-bundled Git distribution, supported versions/capabilities and update/security policy. A displayed version does not implement upstream's Git bundle upgrade. |
 | DIST-02 | Medium | Create Linux packages and a fork-specific release/update pipeline with provenance, signing policy and explicit artifact verification. |
-| PLAT-01 | Before Windows support | Add and test native child-process-tree cancellation; current Windows behavior kills only the direct child. |
+| PLAT-01 | Before Windows support | Add/test native child-process-tree and inherited-pipe cancellation, then enable bounded runtime capture on Windows. Transfers currently kill only the direct child; the version-probe fallback still buffers output without its own deadline. |
 | PLAT-02 | Later | Implement native Windows/macOS adapters, signing, installer/update checks and platform UI QA before claiming delivery support. |
 | ADV-01 | Later | Plan LFS, submodules, tags, cherry-pick, interactive rebase, Enterprise, pull requests and multiple accounts as scoped milestones. |
 
