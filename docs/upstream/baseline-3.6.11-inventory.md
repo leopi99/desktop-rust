@@ -409,6 +409,32 @@ This is Rust hardening of its plain-content preview, not an upstream no-index di
 or image port and not a parity checkpoint advance. Complete diff/image/platform
 contracts and descriptor-relative ancestor handling remain outside this scope.
 
+## Partial staging of regular additions
+
+Focused pinned [working-directory diff](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/diff.ts)
+excerpts use `--no-index -- /dev/null <path>` for added/untracked non-submodules,
+accepting changes-found exit 1. Pinned [patch formatter](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/patch-formatter.ts)
+excerpts use a null source header for new/untracked files and omit unselected
+added rows. These helper excerpts do not establish complete upstream staging,
+unstaging, caller, conversion or platform contracts.
+
+Rust [0ee72609c1](https://github.com/leopi99/desktop-rust/commit/0ee72609c1cfb8b3e94f787c1f04a3a00b7a2bbd) adds complete bounded no-index review for regular untracked
+text absent from HEAD/index, without an intent-to-add write. Quiet exit 1 denotes
+differences; errors, overflow and signals cannot authorize a patch prefix. Selected
+rows can form the first index entry even without HEAD. Working modifications to
+staged additions use the normal index-to-working diff. Partial staged-addition
+reversal derives a modification header from Git's quoted destination and retains
+its index mode; complete reversal removes the entry without changing working bytes.
+One complete addition hunk, existing freshness checks and patch/line budgets apply.
+
+Seven new real-Git regressions cover read-only review/index bytes, unborn commit,
+partial/all-row reversal, executable mode, native/quoted/space paths, UTF-8/CRLF/EOF,
+stale inputs, unsupported forms, bounds, other staged paths and divergent work.
+A subprocess regression checks no-index exit status handling. Empty additions,
+explicit intent entries, recreated tracked paths, deleted/renamed/special formats,
+conversions and complete UI/platform contracts remain outside this increment.
+G-02 and the full baseline stay open; analyzed/parity checkpoints do not advance.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.

@@ -67,7 +67,7 @@ Commit drafts survive branch changes; a failed creation also retains the branch 
 
 ## Stage or unstage selected hunks
 
-For an existing tracked text modification in Changes, choose Review unstaged hunks.
+For a regular text modification or new untracked file in Changes, choose Review unstaged hunks.
 The app reads a complete, separate patch and displays context-bearing blocks with
 Stage hunk buttons. Each action adds just that block to the index, keeps the working
 file intact and preserves already staged changes and other files. Commit still
@@ -88,12 +88,23 @@ a forward-stage review cannot authorize unstaging, and the reverse is also refus
 Unstage at file level continues to reset the whole file's index entry.
 
 This scope accepts unrenamed regular UTF-8 text modifications with unchanged
-Git file mode and no content-conversion policy. New/deleted/renamed files, symlinks,
-submodules, binary/non-UTF-8 data and filters/text/EOL/ident/encoding conversion
-settings require full-file staging or an external Git tool. CRLF bytes without Git
-conversion and no-newline markers are preserved. Staged review requires a present
-regular working file and an existing file modified relative to HEAD; new/deleted
-staged files and staged mode changes remain full-file/external-tool operations.
+Git file mode, regular additions and no content-conversion policy. Deleted/renamed
+files, symlinks, submodules, binary/non-UTF-8 data and filters/text/EOL/ident/encoding
+conversion settings require full-file staging or an external Git tool. CRLF bytes
+without Git conversion and no-newline markers are preserved. Staged review requires
+a present regular working file and a modification or addition relative to HEAD;
+deletions and staged mode changes to existing files remain outside this scope.
+
+For a new file, review compares against the null path without inserting an
+intent-to-add entry. Both HEAD and index must lack the path; recreated tracked
+paths and explicit intent entries require full-file staging. Selected added rows
+form the new index file, leaving all working bytes intact. This also works before
+the first commit. Further working edits to a staged addition can be reviewed normally.
+An addition has one complete hunk; removing some staged rows retains the index
+file and its executable mode. Removing the entire hunk or all its changed rows
+removes the index entry, leaving the working file untracked. Empty new files have
+no text hunk and use full-file staging. Existing complete-patch and line-control
+limits apply to additions as well.
 
 The complete patch is limited to 512 KiB and 128 hunks; working-file contents to
 8 MiB. An oversized or unsupported patch is refused entirely, never staged from a
