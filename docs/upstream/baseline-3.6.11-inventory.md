@@ -513,6 +513,29 @@ visibility/scrolling, buttons/checkboxes, panel handover, IME/HiDPI/accessibilit
 full caller/test inspection remain open in UI-01/UI-04. This is Linux preview
 usability work, not a completed upstream port or checkpoint advance.
 
+## Sidebar panel-button keyboard navigation
+
+Focused pinned [Button excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/lib/button.tsx)
+describe pointer/keyboard click callbacks and forward key handlers, tabIndex and
+ARIA properties to a DOM button. Disabled callbacks are guarded and aria-disabled
+is set. These excerpts do not establish application-wide button order, disabled
+focus behavior, browser activation timing or accessibility parity.
+
+Rust [7085d9701e](https://github.com/leopi99/desktop-rust/commit/7085d9701eb5c8980e9fc07d97d521a23288da22) adds a small Iced wrapper only around sidebar panel buttons.
+Enabled controls join current-tree focus traversal and draw a theme-compatible
+outline. Enter/Space emit the existing PanelSelected event on a matching
+unmodified release; repeats cannot repeatedly activate. Losing focus/window,
+modifier changes, other keys, disable and target changes cancel the armed state.
+A stable target redraw preserves focus. Pointer/touch handling delegates to the
+existing Iced button. The application busy guard still checks the emitted event.
+Git action buttons and checkbox activation remain outside this increment.
+
+Six new widget/event tests plus one capture-option guard cover these contracts.
+Programmatic read-only focus captures at two sizes verify rendering and unchanged
+fixture state; they do not verify native key delivery. Complete sidebar/caller
+inventory, screen-reader semantics, scrolling/panel focus handover, IME/HiDPI and
+native interaction remain open in UI-01/UI-04. No upstream checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.

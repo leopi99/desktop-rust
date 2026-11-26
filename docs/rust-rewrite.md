@@ -748,13 +748,21 @@ The default window is 1200×800 with a minimum of 960×640. A renderer layer cli
 sidebar content, including long paths with the software renderer. Views live in
 `crates/ui/src/layout.rs`; Git operations and their freshness checks are unchanged.
 
-Tab and Shift+Tab cycle forward/backward through the current text inputs,
-including the repository path and visible panel fields. Only otherwise unhandled
-Tab presses are mapped; Ctrl/Alt/Super combinations and captured keys retain their
-existing behavior. The sole focused input retains its cursor on a full cycle.
-This does not activate buttons/checkboxes or provide complete keyboard/accessibility
-support. Native focus visibility, scrolling, IME and full manual acceptance remain
-pending; automated checks use real Iced widgets with a headless renderer.
+Tab and Shift+Tab cycle forward/backward through the current text inputs and
+enabled sidebar panel buttons, in widget-tree order. Disabled navigation controls
+are skipped. Only otherwise unhandled Tab presses are mapped; Ctrl/Alt/Super
+combinations and captured keys retain their existing behavior. The sole focused
+input retains its cursor on a full cycle.
+
+A focused sidebar button has a visible outline. Press and release Enter or Space
+to open its panel; holding/repeating the key does not repeatedly navigate. Losing
+focus, changing modifiers, disabling or changing the button target cancels its
+armed activation. Navigation uses the existing busy guard and draft/review rules.
+Pointer/touch clicks retain their existing behavior. This extension covers panel
+navigation; Git action buttons and checkboxes retain their existing controls.
+Native keyboard delivery, scrolling/panel focus handover, IME/HiDPI and complete
+accessibility/manual acceptance remain pending. Automated checks exercise real
+Iced widgets/events with a headless renderer.
 
 Developer launch options accept a repository, panel and window size:
 
@@ -767,6 +775,13 @@ cargo run --locked -p desktop-rust -- --repository /path/to/repo --size 960x640 
 existing output files and reports failure if the window closes before capture.
 Launch-time repository inspection is read-only and happens before window creation.
 Interactive repository operations continue to use worker threads.
+
+For a read-only focus-ring capture on a disposable repository, use
+`--panel keyboard-nav-review` with both `--repository` and a fresh `--capture`
+path. The first two frames move focus from the repository input to the first
+enabled sidebar button; the fourth frame captures the window. No activation key
+is injected, no panel navigation is requested and no Git data is written. This
+checks rendered focus, not native keyboard delivery.
 
 A repeatable offline fixture captures all seven panels, a read-only branch
 deletion review, missing-Git diagnostics and Unix timeout/output-overflow cases

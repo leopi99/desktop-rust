@@ -34,7 +34,7 @@ UI-01/UI-02 executable; native interaction results remain pending.
 
 | ID | Priority | Status | Acceptance |
 | --- | --- | --- | --- |
-| UI-04 | High | First increment done locally; native QA pending | [d6024034ca](https://github.com/leopi99/desktop-rust/commit/d6024034caa0086b97d204c0e60916041e44f66d) implements cyclic Tab/Shift+Tab across current text inputs, ignores captured keys and Ctrl/Alt/Super combinations, preserves drafts/reviews while busy, and leaves Git actions unchanged. Five automated Iced/widget/state regressions pass. Remaining: keyboard activation of other controls, focus visibility/scrolling/panel changes, IME/HiDPI/accessibility and actual A-01 execution. |
+| UI-04 | High | Text-input/sidebar increments done locally; native QA pending | [d6024034ca](https://github.com/leopi99/desktop-rust/commit/d6024034caa0086b97d204c0e60916041e44f66d) implements cyclic Tab/Shift+Tab across current text inputs, ignores captured keys and Ctrl/Alt/Super combinations, preserves drafts/reviews while busy, and leaves Git actions unchanged. Five automated Iced/widget/state regressions pass. Follow-up [7085d9701e](https://github.com/leopi99/desktop-rust/commit/7085d9701eb5c8980e9fc07d97d521a23288da22) adds enabled sidebar buttons to traversal, visible focus and Enter/Space release activation through existing panel events. Repeats, interrupted/stale presses and disabled/retargeted controls cannot navigate; existing pointer/touch behavior and the late busy guard are covered. Six widget/event regressions plus a read-only focus-capture guard pass. Remaining: Git action buttons/checkboxes, scrolling/panel focus handover, native focus/IME/HiDPI/accessibility and actual A-01 execution. |
 
 ## Merged batch: quality foundations
 

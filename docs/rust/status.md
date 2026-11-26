@@ -42,7 +42,7 @@ PR #9 consolidated the Rust quality/runtime/workflow batch on 2026-11-26 at
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
-| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab text-input traversal on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
+| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal of text inputs and enabled sidebar navigation on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
 | Engine | External Git version/error reports; Unix probe/history/patch deadlines and capture caps, tested on Linux | Windows probe/history/patch/process-tree bounds; stalled-write deadline/cancellation policy; bundled Git/update/capability policy. |
 | Upstream | Weekly discovery, ledger validator, daily watchdog; successful manual runs | Observe scheduled runs, complete initial baseline inventory and port applicable behavior. |
 | Delivery | Linux prototype builds and isolated fixture coverage | Packaging, signing, native account adapters and Windows/macOS release verification. |
@@ -62,9 +62,10 @@ activates buttons, writes Git data or invalidates drafts/hunk selections.
 
 Five new regressions use the actual Iced event subscription and text-input widgets
 with a headless renderer, plus application state preservation while busy. They
-are automated widget checks, not a native keyboard session. Keyboard activation
-of buttons/checkboxes, focus visibility/scrolling/panel transitions and full
-A-01–A-10 acceptance remain open. This branch groups compatible usability work
+are automated widget checks, not a native keyboard session. At that increment,
+button activation was outside the focus traversal. The sidebar follow-up below
+adds navigation controls; Git action buttons/checkboxes, focus scrolling/panel
+handover and full A-01–A-10 acceptance remain open. This branch groups compatible usability work
 before one milestone PR; no per-feature PR is opened automatically.
 
 This increment passed 413 Rust tests (112 UI), 10 compiler/policy tests, 32 upstream
@@ -73,6 +74,32 @@ The minimum-size own-window smoke passed eight panels and three Git failures wit
 unchanged fixture state (`/tmp/desktop-rust-linux-usability-smoke-960`). The root UI
 protocol is now 92 variants, with focus routed exhaustively through application
 events. No native keyboard session or complete accessibility QA is claimed.
+
+Sidebar follow-up [7085d9701e](https://github.com/leopi99/desktop-rust/commit/7085d9701eb5c8980e9fc07d97d521a23288da22) makes the seven enabled panel buttons focusable
+in the same traversal, with a theme-text-color focus ring. Enter/Space arm on key
+press and emit the existing PanelSelected event once on matching unmodified key
+release. Repeats do not emit extra actions. Focus/window loss, another key,
+modifier changes, disabling or changing the bound panel cancel the armed state.
+A benign redraw of the same target preserves focus. Mouse/touch activation still
+uses the original Iced button path. Disabled sidebar buttons are skipped, and
+queued navigation still passes through the application's busy guard.
+
+Six new widget/event regressions cover mixed input/navigation traversal, disabled
+controls, release/repeat semantics, interrupted/stale presses, modifiers and
+unfocused keys, mouse/touch compatibility, redraw and late busy delivery. One
+capture-option regression checks explicit repository/destination guards. The
+complete local gate passes 420 Rust tests (119 UI), 10 compiler/policy tests and
+32 upstream tests, plus formatter/Clippy/rustdoc/npm lint.
+
+A read-only `keyboard-nav-review` developer capture applies two focus moves during
+the first frames, then records the existing window capture. It neither activates
+a panel nor writes Git data. Focus rings were captured and visually inspected at
+960×640 and 1200×800 with unchanged fixture signatures
+(`/tmp/desktop-rust-nav-focus-801a9we3`). The minimum-size eight-panel/three-failure
+smoke also passed (`/tmp/desktop-rust-nav-smoke-960`). Programmatic focus/captures
+and headless widget events do not establish native keyboard/IME/accessibility QA.
+The root protocol stays at 92 messages; Git action buttons and checkboxes are not
+added to keyboard activation. UI-01/UI-04 and baseline analysis remain open.
 
 ## Merged batch: Rust quality and process hardening
 

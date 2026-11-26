@@ -50,7 +50,7 @@ separate evidence.
 
 | ID | Fixture | Actions | Required observation |
 | --- | --- | --- | --- |
-| A-01 | changes | Enter summary/description; navigate every panel; return and refresh. Try Tab/Shift+Tab, selection, copy/paste and non-ASCII input. | Drafts survive navigation/refresh; focus is visible and editable controls are reachable. Record navigation/IME failures explicitly. |
+| A-01 | changes | Enter summary/description; navigate every panel; return and refresh. Try Tab/Shift+Tab, Enter/Space on sidebar buttons, selection, copy/paste and non-ASCII input. | Drafts survive navigation/refresh; focus is visible and editable controls are reachable. Record navigation/IME failures explicitly. |
 | A-02 | changes | Review `tracked.txt`; select one replacement pair; stage; commit with a unique message. Inspect before/after. | Only the selected block and existing staged rename enter the commit. The other edit, new file, deleted file and `keep-untracked.txt` stay available. Commit includes the entire index, not only the selected file. |
 | A-03 | changes | On a fresh fixture, stage/unstage selected rows of `new.txt` and `delete.txt`; edit and partially stage `renamed.txt`. | Index bytes match the selection; working bytes/absence stay intact; the old rename source is not recreated. Wrong-side actions are unavailable. |
 | A-04 | changes | Open a review; modify its file with an editor; apply the old selection. Retry after fresh review. | Stale selection is refused; new edits and draft survive; fresh review recovers. |
@@ -75,6 +75,7 @@ status alone as proof that the right content was committed.
 | Automated Rust/Git/policy checks and own-window smoke | Recorded separately in [status](status.md) and the consolidation evidence. |
 | Text-input Tab/Shift+Tab traversal | Implemented in the usability branch; automated Iced subscription/widget/state checks pass. Native key input, other controls and accessibility remain pending. |
 | A-01 through A-10 actual interactive execution | Not run; UI-01/UI-02 remain open. |
+| Sidebar focus/activation | Implemented; mixed traversal, release/repeat/interruption guards, disabled/retargeted controls, mouse/touch and late busy delivery have automated widget coverage. Programmatic focus-ring captures visually checked at both sizes; native keyboard session pending. |
 | Native Windows/macOS, full accessibility/IME/HiDPI verification | Not run. |
 
 ## Alpha exit conditions
