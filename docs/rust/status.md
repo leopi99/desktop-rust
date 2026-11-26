@@ -34,7 +34,7 @@ All eight are merged. Independent prototype features do not imply release parity
 | Area | Implemented and checked | Remaining boundary |
 | --- | --- | --- |
 | Workspace | core/Git/Iced split; Cargo lockfile; Rust/npm CI | Quality policy in the current batch still needs its batch merge. |
-| Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, scoped whole-hunk and individual-line staging/unstaging for modifications and additions, commits | Broader formats, implicit EOF joining/editing, large-repository virtualization and richer rendering. |
+| Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, scoped whole-hunk and individual-line staging/unstaging for modifications, additions and deletions, commits | Broader formats, implicit EOF joining/editing, large-repository virtualization and richer rendering. |
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
@@ -88,7 +88,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 394 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 401 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -301,6 +301,28 @@ The root UI protocol remains 91 variants; existing selection, draft and freshnes
 invalidation behavior is reused. Captures do not replace interaction/accessibility
 or native platform QA. G-02 and full-baseline analysis remain open; no upstream
 checkpoint advances.
+Partial regular deletions ([e462bf5c48](https://github.com/leopi99/desktop-rust/commit/e462bf5c481400b456498da80aa6370dc341a7e8), 2026-11-26) passed 401 Rust tests
+(including 107 existing UI state/capture-option tests), 32 upstream and 10
+compiler/policy tests, plus formatting, Clippy, warning-free rustdoc and npm lint.
+Seven new real-Git regressions cover partial staging/commit and continued
+unstaging, missing working files, native/quoted/space names, exact CRLF/EOF bytes,
+executable modes, stale inputs, source/patch limits, unsupported formats and
+conversions, index lock failure/retry and removed staged additions. The unsupported
+source regression was extended with deleted symlinks and rerun separately; final
+all-target/all-feature Clippy and all 107 UI tests also pass.
+Missing working files stay absent through both index directions. Complete source
+reads use the index, or fixed HEAD for a staged deletion, with an 8 MiB limit and
+UTF-8/NUL validation. Complete patches remain capped at 512 KiB/128 hunks and line
+controls at 64 KiB/1,024 changed rows. Empty deletions and recreated staged-deletion
+paths use full-file/external-tool workflows; broader conversion/special-file
+contracts and interactive/platform QA remain open.
+Both deletion selection directions were captured and visually inspected at
+960×640 and 1200×800, with unchanged fixture signatures and the file still absent
+(`/tmp/desktop-rust-deletion-ui-qodc_4_g`). The eight-panel/three-failure smoke
+passed at 960×640 with unchanged data (`/tmp/desktop-rust-deletion-smoke-960`).
+No root UI variant was added; selection invalidation and draft preservation reuse
+the existing protocol. G-02 and full baseline analysis remain open; no upstream
+analysis/parity checkpoint advances.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.

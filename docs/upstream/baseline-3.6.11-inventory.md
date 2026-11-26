@@ -435,6 +435,33 @@ explicit intent entries, recreated tracked paths, deleted/renamed/special format
 conversions and complete UI/platform contracts remain outside this increment.
 G-02 and the full baseline stay open; analyzed/parity checkpoints do not advance.
 
+## Partial staging and unstaging of regular deletions
+
+Focused pinned [patch formatter excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/patch-formatter.ts)
+route deleted status to the same source/destination path header. Forward selection
+retains unselected deleted rows as context; the reversal helper omits unselected
+deleted rows. Its working-file reversal contract is distinct from Rust's cached
+index-only unstaging. This inspection does not establish full upstream deletion,
+index/caller, original fixture or platform parity.
+
+Rust [e462bf5c48](https://github.com/leopi99/desktop-rust/commit/e462bf5c481400b456498da80aa6370dc341a7e8) accepts regular 100644/100755 deletion headers with one complete
+hunk. Partial forward deletion derives a modification header, keeping unselected
+index rows and mode. Reversing a staged deletion restores only selected rows in
+the index with the original mode. Entire hunks/all changed rows support complete
+deletion or restoration. The working path stays absent, including subsequent
+reviews of staged modifications/additions. Missing working files cause a complete
+8 MiB source read from the index, or the fixed HEAD for staged deletions; invalid
+UTF-8/NUL data, source overflow and unsupported patch modes are refused. Existing
+512 KiB/128-hunk and 64 KiB/1,024-line selection budgets remain in place.
+
+Seven new real-Git regressions cover partial deletion commits, continuation after
+partial unstaging, native/space/quoted paths, exact CRLF/EOF bytes, executable
+modes, stale state and recreated working files, source/patch caps, unsupported
+text/conversions/symlinks, index lock failure/retry, other staged paths and removed
+staged additions. Empty deletions still use full-file controls. Broader formats,
+conversion contracts, original fixture/caller audit and interactive/platform QA
+remain open. No upstream analysis/parity checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.

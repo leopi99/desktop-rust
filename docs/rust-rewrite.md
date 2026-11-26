@@ -67,7 +67,8 @@ Commit drafts survive branch changes; a failed creation also retains the branch 
 
 ## Stage or unstage selected hunks
 
-For a regular text modification or new untracked file in Changes, choose Review unstaged hunks.
+For a regular text modification, addition or deletion in Changes, choose Review
+unstaged hunks.
 The app reads a complete, separate patch and displays context-bearing blocks with
 Stage hunk buttons. Each action adds just that block to the index, keeps the working
 file intact and preserves already staged changes and other files. Commit still
@@ -80,7 +81,7 @@ and Unstage hunk buttons still act only on their named block. Either action cons
 the review and clears the checkbox selection; review again after refresh.
 The ordinary, potentially clipped diff preview cannot authorize a partial write.
 
-For a staged text modification, choose Review staged hunks and then Unstage hunk.
+For a staged text change, choose Review staged hunks and then Unstage hunk.
 This reverses only that block from the HEAD-to-index comparison; it never restores
 HEAD into the working file. Other staged blocks and additional working-only edits
 remain intact. The staged/unstaged label and action are bound to the review:
@@ -88,12 +89,13 @@ a forward-stage review cannot authorize unstaging, and the reverse is also refus
 Unstage at file level continues to reset the whole file's index entry.
 
 This scope accepts unrenamed regular UTF-8 text modifications with unchanged
-Git file mode, regular additions and no content-conversion policy. Deleted/renamed
-files, symlinks, submodules, binary/non-UTF-8 data and filters/text/EOL/ident/encoding
-conversion settings require full-file staging or an external Git tool. CRLF bytes
-without Git conversion and no-newline markers are preserved. Staged review requires
-a present regular working file and a modification or addition relative to HEAD;
-deletions and staged mode changes to existing files remain outside this scope.
+Git file mode, regular additions/deletions and no content-conversion policy.
+Renamed files, symlinks, submodules, binary/non-UTF-8 data and
+filters/text/EOL/ident/encoding conversion settings require full-file staging or an
+external Git tool. CRLF bytes without Git conversion and no-newline markers are
+preserved. Staged mode changes to existing files remain outside this scope.
+Absent working files use a complete bounded source read from the index, or HEAD
+for a staged deletion; source text must be UTF-8 without NUL bytes.
 
 For a new file, review compares against the null path without inserting an
 intent-to-add entry. Both HEAD and index must lack the path; recreated tracked
@@ -106,9 +108,20 @@ removes the index entry, leaving the working file untracked. Empty new files hav
 no text hunk and use full-file staging. Existing complete-patch and line-control
 limits apply to additions as well.
 
+For an absent deleted file, selecting minus rows stages just those line removals.
+Unselected rows remain in the index with its original executable mode. The whole
+hunk or all changed rows stages the entire deletion, removing the index entry.
+Unstaging selected minus rows of a staged deletion restores only those rows to
+the index, retaining the HEAD file mode. Review again to remove further staged
+changes; staged modifications/additions can also be reviewed while the working
+file remains absent. This includes additions staged before being removed from
+disk. None of these actions recreates a working file. A recreated working path
+invalidates a deletion review. Empty deleted files have no text hunk and use
+full-file controls. Binary, special and converted sources remain unsupported.
+
 The complete patch is limited to 512 KiB and 128 hunks; working-file contents to
-8 MiB. An oversized or unsupported patch is refused entirely, never staged from a
-clipped prefix. Git path quoting is retained exactly, including native Unix names.
+8 MiB, also for source blobs read when working files are absent. An oversized or
+unsupported patch is refused entirely, never staged from a clipped prefix. Git path quoting is retained exactly, including native Unix names.
 The parser checks a single regular-file header and each hunk's row counts. Before
 writing, the app rereads the full review: comparison direction, bytes/mode, status, index/HEAD/operation
 state, attributes, settings and every patch block must still match. Navigation,
