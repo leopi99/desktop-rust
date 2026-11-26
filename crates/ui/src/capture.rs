@@ -167,7 +167,7 @@ impl Start {
                     HunkSide::Unstaged => change.can_review_unstaged_hunks(),
                     HunkSide::Staged => change.can_review_staged_hunks(),
                 })
-                .ok_or("Hunk capture needs a supported text modification or addition")?;
+                .ok_or("Hunk capture needs a supported regular text change")?;
             let review = match side {
                 HunkSide::Unstaged => desktop_git::review_hunks(&snapshot.repository.path, change)?,
                 HunkSide::Staged => {

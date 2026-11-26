@@ -102,7 +102,13 @@ pub(super) fn patch(review: &HunkReview, selection: &[HunkLine]) -> io::Result<S
             && super::addition_mode(&review.header).is_some()
             && old_count > 0
         {
-            patch = super::partial_addition_header(&review.header)?;
+            patch = super::partial_file_header(&review.header, true)?;
+        }
+        if review.side == HunkSide::Unstaged
+            && super::deletion_mode(&review.header).is_some()
+            && new_count > 0
+        {
+            patch = super::partial_file_header(&review.header, false)?;
         }
         let (source_start, source_count, target_count) = match review.side {
             HunkSide::Unstaged => (old_start, old_count, new_count),

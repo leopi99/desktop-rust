@@ -1,7 +1,11 @@
 //! Complete context-bearing reviews and index-only updates of selected hunks.
 mod lines;
 use desktop_core::{ConflictWorkingContent, FileChange, HunkLine, HunkReview, HunkSide};
-use std::{ffi::OsStr, io, path::Path};
+use std::{
+    ffi::{OsStr, OsString},
+    io,
+    path::Path,
+};
 
 fn invalid() -> io::Error {
     io::Error::new(
@@ -60,22 +64,78 @@ fn addition_mode(header: &str) -> Option<bool> {
     }
 }
 
-// Partial reversal of an addition keeps an existing index file. Retain Git's
-// quoted native destination spelling; a plain modification header preserves mode.
-fn partial_addition_header(header: &str) -> io::Result<String> {
+fn deletion_mode(header: &str) -> Option<bool> {
+    match header.lines().nth(1) {
+        Some("deleted file mode 100644") => Some(false),
+        Some("deleted file mode 100755") => Some(true),
+        _ => None,
+    }
+}
+
+// A partial addition reversal or forward deletion keeps an index file. Derive
+// the other path prefix from Git's spelling, retaining native quoting/timestamps.
+fn partial_file_header(header: &str, addition: bool) -> io::Result<String> {
     let lines: Vec<_> = header.lines().collect();
-    if lines.len() != 5 || addition_mode(header).is_none() {
+    if lines.len() != 5 {
         return Err(invalid());
     }
-    let destination = lines[4].strip_prefix("+++ ").ok_or_else(invalid)?;
-    let source = if let Some(path) = destination.strip_prefix("b/") {
-        format!("a/{path}")
-    } else if let Some(path) = destination.strip_prefix("\"b/") {
-        format!("\"a/{path}")
+    let (source, destination) = if addition {
+        let destination = lines[4].strip_prefix("+++ ").ok_or_else(invalid)?;
+        (
+            other_prefix(destination, "b/", "a/")?,
+            destination.to_owned(),
+        )
     } else {
-        return Err(invalid());
+        let source = lines[3].strip_prefix("--- ").ok_or_else(invalid)?;
+        (source.to_owned(), other_prefix(source, "a/", "b/")?)
     };
-    Ok(format!("{}\n--- {source}\n{}\n", lines[0], lines[4]))
+    Ok(format!("{}\n--- {source}\n+++ {destination}\n", lines[0]))
+}
+
+fn other_prefix(path: &str, from: &str, to: &str) -> io::Result<String> {
+    if let Some(suffix) = path.strip_prefix(from) {
+        Ok(format!("{to}{suffix}"))
+    } else if let Some(suffix) = path.strip_prefix(&format!("\"{from}")) {
+        Ok(format!("\"{to}{suffix}"))
+    } else {
+        Err(invalid())
+    }
+}
+
+fn validate_content(
+    root: &Path,
+    selected: &FileChange,
+    side: HunkSide,
+    working: &ConflictWorkingContent,
+    basis: &desktop_core::CommitBasis,
+) -> io::Result<()> {
+    let source;
+    let bytes = match working {
+        ConflictWorkingContent::File { bytes, .. } => bytes,
+        ConflictWorkingContent::Deleted => {
+            let mut object = if side == HunkSide::Staged && selected.index == 'D' {
+                OsString::from(basis.head.as_ref().ok_or_else(invalid)?.trim())
+            } else {
+                OsString::new()
+            };
+            object.push(":");
+            object.push(&selected.path);
+            source = super::read_output::complete(
+                root,
+                &[
+                    OsStr::new("cat-file"),
+                    OsStr::new("blob"),
+                    object.as_os_str(),
+                ],
+                8 * 1024 * 1024,
+            )?;
+            &source
+        }
+    };
+    if bytes.contains(&0) || std::str::from_utf8(bytes).is_err() {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 fn ensure_untracked_absence(
@@ -116,6 +176,9 @@ fn ensure_untracked_absence(
 }
 
 fn parse(patch: String) -> io::Result<(String, Vec<String>)> {
+    if patch.contains('\0') {
+        return Err(invalid());
+    }
     let first = patch
         .find("\n@@ ")
         .map(|offset| offset + 1)
@@ -134,7 +197,13 @@ fn parse(patch: String) -> io::Result<(String, Vec<String>)> {
         && lines[2].starts_with("index ")
         && lines[3] == "--- /dev/null"
         && lines[4].starts_with("+++ ");
-    if !regular && !addition {
+    let deletion = lines.len() == 5
+        && lines[0].starts_with("diff --git ")
+        && deletion_mode(header).is_some()
+        && lines[2].starts_with("index ")
+        && lines[3].starts_with("--- ")
+        && lines[4] == "+++ /dev/null";
+    if !regular && !addition && !deletion {
         return Err(invalid());
     }
     let mut hunks = Vec::new();
@@ -153,15 +222,17 @@ fn parse(patch: String) -> io::Result<(String, Vec<String>)> {
         validate_hunk(hunk)?;
         hunks.push(hunk.to_owned());
     }
-    if addition && hunks.len() != 1 {
+    if (addition || deletion) && hunks.len() != 1 {
         return Err(invalid());
     }
     Ok((header.to_owned(), hunks))
 }
 
-/// Review complete unstaged hunks for a regular UTF-8 modification or new file.
+/// Review complete unstaged hunks for regular UTF-8 modifications, additions or deletions.
 /// Untracked paths must be absent from HEAD/index; review does not add an intent
 /// entry. Unrenamed modifications to staged additions are also supported.
+/// Missing working files stay absent; their complete index source is read with
+/// an 8 MiB cap before a deletion patch can authorize an index update.
 /// Patch input is capped at 512 KiB and 128 hunks; file bytes at 8 MiB. This is
 /// distinct from the possibly clipped ordinary display diff.
 ///
@@ -173,9 +244,11 @@ pub fn review_hunks(path: &Path, selected: &FileChange) -> io::Result<HunkReview
     review(path, selected, HunkSide::Unstaged)
 }
 
-/// Review complete staged hunks of a regular UTF-8 modification or addition.
+/// Review complete staged hunks of regular UTF-8 modifications, additions or deletions.
 /// Each reviewed block can be removed from the index without writing the working
-/// file. Limits and conversion exclusions match the unstaged review.
+/// file, including when it is absent. Deleted paths use their full HEAD source;
+/// other absent working paths use their index source, both capped at 8 MiB.
+/// Limits and conversion exclusions match the unstaged review.
 ///
 /// # Errors
 ///
@@ -194,7 +267,7 @@ fn review(path: &Path, selected: &FileChange, side: HunkSide) -> io::Result<Hunk
         }
     {
         return Err(io::Error::other(
-            "Hunk operations require an unrenamed regular text modification or addition on the chosen side",
+            "Hunk operations require an unrenamed regular text change on the chosen side",
         ));
     }
     let root = &state.repository.path;
@@ -204,10 +277,14 @@ fn review(path: &Path, selected: &FileChange, side: HunkSide) -> io::Result<Hunk
         ensure_untracked_absence(root, selected, &state.commit_basis)?;
     }
     let working = super::conflicts::working_content(root, &selected.path)?;
-    if !matches!(&working, ConflictWorkingContent::File {bytes, ..} if !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok())
-    {
+    let deletion = match side {
+        HunkSide::Unstaged => selected.worktree == 'D',
+        HunkSide::Staged => selected.index == 'D',
+    };
+    if deletion && working != ConflictWorkingContent::Deleted {
         return Err(invalid());
     }
+    validate_content(root, selected, side, &working, &state.commit_basis)?;
     let (attributes, settings) = super::conflicts::conversion_policy(root, &selected.path)?;
     let mut args = vec![
         OsStr::new("-c"),
@@ -247,6 +324,9 @@ fn review(path: &Path, selected: &FileChange, side: HunkSide) -> io::Result<Hunk
         super::read_output::complete(root, &args, 512 * 1024)?
     };
     let (header, hunks) = parse(String::from_utf8(raw).map_err(|_| invalid())?)?;
+    if deletion != deletion_mode(&header).is_some() {
+        return Err(invalid());
+    }
     if untracked
         && !matches!(&working,ConflictWorkingContent::File{executable,..} if addition_mode(&header)==Some(*executable))
     {
