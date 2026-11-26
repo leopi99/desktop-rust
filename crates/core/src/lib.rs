@@ -142,12 +142,16 @@ impl FileChange {
     }
 
     /// Status-only eligibility for an unstaged hunk review, including untracked
-    /// files, deletions and working edits to staged additions. File type, HEAD/index absence,
-    /// conversion policy and content limits still require adapter validation.
+    /// files, deletions and working edits/deletions at a staged rename destination.
+    /// File type, HEAD/index absence for untracked paths, conversion policy and
+    /// content limits still require adapter validation.
     pub fn can_review_unstaged_hunks(&self) -> bool {
-        self.original_path.is_none()
+        (self.original_path.is_none()
             && ((matches!(self.worktree, 'M' | 'D') && matches!(self.index, ' ' | 'M' | 'A'))
-                || (self.index == '?' && self.worktree == '?'))
+                || (self.index == '?' && self.worktree == '?')))
+            || (self.original_path.is_some()
+                && self.index == 'R'
+                && matches!(self.worktree, 'M' | 'D'))
     }
 
     /// Status-only eligibility for staged modifications, additions or deletions.

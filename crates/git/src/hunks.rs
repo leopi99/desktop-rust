@@ -230,7 +230,8 @@ fn parse(patch: String) -> io::Result<(String, Vec<String>)> {
 
 /// Review complete unstaged hunks for regular UTF-8 modifications, additions or deletions.
 /// Untracked paths must be absent from HEAD/index; review does not add an intent
-/// entry. Unrenamed modifications to staged additions are also supported.
+/// entry. Working edits/deletions at a staged rename destination are supported;
+/// the patch targets only the destination index entry and never restores a source entry.
 /// Missing working files stay absent; their complete index source is read with
 /// an 8 MiB cap before a deletion patch can authorize an index update.
 /// Patch input is capped at 512 KiB and 128 hunks; file bytes at 8 MiB. This is
@@ -267,7 +268,7 @@ fn review(path: &Path, selected: &FileChange, side: HunkSide) -> io::Result<Hunk
         }
     {
         return Err(io::Error::other(
-            "Hunk operations require an unrenamed regular text change on the chosen side",
+            "Hunk operations require a supported regular text change on the chosen side",
         ));
     }
     let root = &state.repository.path;

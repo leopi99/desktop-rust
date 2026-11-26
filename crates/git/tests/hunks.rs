@@ -286,7 +286,7 @@ fn literal_and_native_paths_never_stage_a_different_file() {
 
 #[cfg(unix)]
 #[test]
-fn symlinks_mode_changes_and_renamed_paths_do_not_produce_hunk_write_reviews() {
+fn symlinks_mode_changes_and_pure_renames_do_not_produce_hunk_write_reviews() {
     use std::os::unix::fs::{symlink, PermissionsExt};
     for kind in ["symlink", "mode", "rename"] {
         let f = Fixture::new("file", &contents(&[]), &contents(&[10, 35]));
@@ -1772,4 +1772,297 @@ fn removed_staged_addition_supports_both_index_directions_without_a_working_file
     desktop_git::commit(&f.root, "Partial removed addition", &f.basis()).unwrap();
     assert_eq!(f.git(&["show", "HEAD:new-file"]), b"first\n");
     assert!(!f.file().exists());
+}
+
+fn staged_rename(source: &Path, destination: &Path, base: &[u8], working: &[u8]) -> Fixture {
+    let mut f = Fixture::new(source, base, base);
+    f.git(&[
+        OsStr::new("mv"),
+        OsStr::new("--"),
+        source.as_os_str(),
+        destination.as_os_str(),
+    ]);
+    f.name = destination.to_owned();
+    std::fs::write(f.file(), working).unwrap();
+    assert_eq!(f.change().index, 'R');
+    assert_eq!(f.change().original_path.as_deref(), Some(source));
+    f
+}
+
+#[test]
+fn staged_rename_hunk_commit_preserves_the_move_other_index_paths_and_recreated_source() {
+    let f = staged_rename(
+        Path::new("source"),
+        Path::new("destination"),
+        &contents(&[]),
+        &contents(&[10, 35]),
+    );
+    std::fs::write(f.root.join("other"), b"other staged\n").unwrap();
+    f.git(&["add", "--", "other"]);
+    let basis = f.basis();
+    let index = std::fs::read(f.root.join(".git/index")).unwrap();
+    let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    assert_eq!(f.basis(), basis);
+    assert_eq!(std::fs::read(f.root.join(".git/index")).unwrap(), index);
+    std::fs::write(f.root.join("source"), b"new user content at old name\n").unwrap();
+    desktop_git::stage_hunk(&review, 0).unwrap();
+    assert_eq!(f.index(), contents(&[10]));
+    assert!(f.git(&["ls-files", "--", "source"]).is_empty());
+    assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[10, 35]));
+    assert_eq!(
+        std::fs::read(f.root.join("source")).unwrap(),
+        b"new user content at old name\n"
+    );
+    desktop_git::commit(&f.root, "Renamed with selected edit", &f.basis()).unwrap();
+    assert_eq!(f.git(&["show", "HEAD:destination"]), contents(&[10]));
+    assert_eq!(f.git(&["show", "HEAD:other"]), b"other staged\n");
+    assert!(f.git(&["ls-tree", "-z", "HEAD", "--", "source"]).is_empty());
+    assert_eq!(
+        std::fs::read(f.root.join("source")).unwrap(),
+        b"new user content at old name\n"
+    );
+}
+
+#[test]
+fn staged_rename_line_choices_can_add_then_remove_the_original_row() {
+    let f = staged_rename(
+        Path::new("source"),
+        Path::new("destination"),
+        &contents(&[]),
+        &contents(&[10, 35]),
+    );
+    let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    desktop_git::stage_lines(&review, &[row(&review, "+line 010 edited\n")]).unwrap();
+    let expected = String::from_utf8(contents(&[]))
+        .unwrap()
+        .replace("line 010\n", "line 010\nline 010 edited\n");
+    assert_eq!(f.index(), expected.as_bytes());
+    let remaining = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    desktop_git::stage_lines(&remaining, &[row(&remaining, "-line 010\n")]).unwrap();
+    assert_eq!(f.index(), contents(&[10]));
+    assert!(!f.root.join("source").exists());
+    assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[10, 35]));
+}
+
+#[test]
+fn staged_rename_multiple_hunks_keep_prior_staged_edits_and_unselected_blocks() {
+    let mut f = Fixture::new("source", &contents(&[]), &contents(&[1]));
+    f.git(&["add", "--", "source"]);
+    f.git(&["mv", "--", "source", "destination"]);
+    f.name = PathBuf::from("destination");
+    std::fs::write(f.file(), contents(&[1, 10, 25, 40])).unwrap();
+    let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    assert_eq!(review.hunks.len(), 3);
+    desktop_git::stage_hunks(&review, &[2, 0]).unwrap();
+    assert_eq!(f.index(), contents(&[1, 10, 40]));
+    assert!(f.git(&["ls-files", "--", "source"]).is_empty());
+    assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[1, 10, 25, 40]));
+}
+
+#[test]
+fn staged_rename_destination_deletion_keeps_remaining_index_text_and_working_absence() {
+    let f = staged_rename(
+        Path::new("source"),
+        Path::new("destination"),
+        &contents(&[]),
+        &contents(&[]),
+    );
+    std::fs::remove_file(f.file()).unwrap();
+    let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    desktop_git::stage_lines(&review, &[row(&review, "-line 010\n")]).unwrap();
+    let expected = String::from_utf8(contents(&[]))
+        .unwrap()
+        .replace("line 010\n", "");
+    assert_eq!(f.index(), expected.as_bytes());
+    assert!(!f.file().exists());
+    assert!(!f.root.join("source").exists());
+    assert_eq!(f.change().index, 'R');
+    let remaining = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    desktop_git::stage_hunk(&remaining, 0).unwrap();
+    assert!(f
+        .git(&["ls-files", "--", "source", "destination"])
+        .is_empty());
+    assert!(!f.file().exists());
+    assert!(!f.root.join("source").exists());
+}
+
+#[test]
+fn staged_rename_native_names_crlf_eof_and_mode_only_change_destination_content() {
+    let mut names = vec![(
+        PathBuf::from("source space"),
+        PathBuf::from("destination[?]*\t\n"),
+    )];
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        names.push((
+            std::ffi::OsString::from_vec(b"source-\xff".to_vec()).into(),
+            std::ffi::OsString::from_vec(b"destination-\xfe".to_vec()).into(),
+        ));
+    }
+    for (source, destination) in names {
+        for crlf in [false, true] {
+            let convert = |bytes: Vec<u8>| {
+                let text = String::from_utf8(bytes).unwrap();
+                let text = text.strip_suffix('\n').unwrap();
+                if crlf {
+                    text.replace('\n', "\r\n").into_bytes()
+                } else {
+                    text.as_bytes().to_vec()
+                }
+            };
+            let base = convert(contents(&[]));
+            let work = convert(contents(&[10, 35]));
+            let f = staged_rename(&source, &destination, &base, &work);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(f.file(), std::fs::Permissions::from_mode(0o755)).unwrap();
+                std::fs::write(f.file(), &base).unwrap();
+                f.git(&[
+                    OsStr::new("update-index"),
+                    OsStr::new("--chmod=+x"),
+                    OsStr::new("--"),
+                    destination.as_os_str(),
+                ]);
+            }
+            std::fs::write(f.file(), &work).unwrap();
+            let mode = f.git(&[
+                OsStr::new("ls-files"),
+                OsStr::new("--stage"),
+                OsStr::new("--"),
+                destination.as_os_str(),
+            ]);
+            let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+            desktop_git::stage_hunk(&review, 0).unwrap();
+            assert_eq!(f.index(), convert(contents(&[10])));
+            let entry = f.git(&[
+                OsStr::new("ls-files"),
+                OsStr::new("--stage"),
+                OsStr::new("--"),
+                destination.as_os_str(),
+            ]);
+            assert_eq!(&entry[..6], &mode[..6]);
+            assert!(f
+                .git(&[OsStr::new("ls-files"), OsStr::new("--"), source.as_os_str()])
+                .is_empty());
+            assert!(!f.root.join(&source).exists());
+            assert_eq!(std::fs::read(f.file()).unwrap(), work);
+        }
+    }
+}
+
+#[test]
+fn staged_rename_stale_inputs_and_destination_policy_refuse_partial_writes() {
+    for mutation in [
+        "working",
+        "index",
+        "head",
+        "attributes",
+        "settings",
+        "rename",
+        "symlink",
+        "mode",
+        "binary",
+        "encoding",
+        "large",
+    ] {
+        let f = staged_rename(
+            Path::new("source"),
+            Path::new("destination"),
+            &contents(&[]),
+            &contents(&[10, 35]),
+        );
+        let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+        match mutation {
+            "working" => std::fs::write(f.file(), contents(&[11, 35])).unwrap(),
+            "index" => {
+                std::fs::write(f.root.join("other"), b"other\n").unwrap();
+                f.git(&["add", "--", "other"]);
+            }
+            "head" => {
+                f.git(&["commit", "--allow-empty", "-m", "Advance"]);
+            }
+            "attributes" => std::fs::write(
+                f.root.join(".git/info/attributes"),
+                b"destination filter=fixture\n",
+            )
+            .unwrap(),
+            "settings" => {
+                f.git(&["config", "core.safecrlf", "true"]);
+            }
+            "rename" => {
+                f.git(&["mv", "--", "destination", "moved-again"]);
+            }
+            "symlink" => {
+                #[cfg(unix)]
+                {
+                    std::fs::remove_file(f.file()).unwrap();
+                    std::os::unix::fs::symlink("source", f.file()).unwrap();
+                }
+                #[cfg(not(unix))]
+                continue;
+            }
+            "mode" => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(f.file(), std::fs::Permissions::from_mode(0o755))
+                        .unwrap();
+                }
+                #[cfg(not(unix))]
+                continue;
+            }
+            "binary" => std::fs::write(f.file(), b"binary\0data").unwrap(),
+            "encoding" => std::fs::write(f.file(), b"bad-\xff\n").unwrap(),
+            _ => std::fs::write(f.file(), vec![b'x'; 600_000]).unwrap(),
+        }
+        let before = f.basis();
+        let destination = std::fs::read(f.file()).ok();
+        assert!(desktop_git::stage_hunk(&review, 0).is_err(), "{mutation}");
+        assert_eq!(f.basis(), before);
+        assert_eq!(std::fs::read(f.file()).ok(), destination);
+        assert!(!f.root.join("source").exists());
+        if mutation == "rename" {
+            assert_eq!(
+                std::fs::read(f.root.join("moved-again")).unwrap(),
+                contents(&[10, 35])
+            );
+        }
+        if matches!(
+            mutation,
+            "attributes" | "symlink" | "mode" | "binary" | "encoding" | "large"
+        ) {
+            assert!(
+                desktop_git::review_hunks(&f.root, &f.change()).is_err(),
+                "{mutation}"
+            );
+            assert_eq!(f.basis(), before);
+        }
+    }
+}
+
+#[test]
+fn staged_rename_reviews_cannot_unstage_the_move_and_index_lock_failure_is_recoverable() {
+    let f = staged_rename(
+        Path::new("source"),
+        Path::new("destination"),
+        &contents(&[]),
+        &contents(&[10, 35]),
+    );
+    let before = f.basis();
+    assert!(desktop_git::review_staged_hunks(&f.root, &f.change()).is_err());
+    let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    assert!(desktop_git::unstage_hunk(&review, 0).is_err());
+    let mut forged = review.clone();
+    forged.change.original_path = Some(PathBuf::from("unrelated"));
+    assert!(desktop_git::stage_hunk(&forged, 0).is_err());
+    std::fs::write(f.root.join(".git/index.lock"), b"fixture lock").unwrap();
+    assert!(desktop_git::stage_hunk(&review, 0).is_err());
+    assert_eq!(f.basis(), before);
+    assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[10, 35]));
+    assert!(!f.root.join("source").exists());
+    std::fs::remove_file(f.root.join(".git/index.lock")).unwrap();
+    desktop_git::stage_hunk(&review, 0).unwrap();
+    assert_eq!(f.index(), contents(&[10]));
 }
