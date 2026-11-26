@@ -10,6 +10,7 @@ pub use conflicts::{
 mod process;
 mod read_output;
 mod runtime;
+mod working_files;
 pub use runtime::git_runtime;
 mod hunks;
 pub use hunks::{
@@ -87,6 +88,12 @@ fn file_path(bytes: &[u8]) -> io::Result<PathBuf> {
     }
 }
 
+fn repository_root(path: &Path) -> io::Result<PathBuf> {
+    let root = read_output::complete(path, &["rev-parse", "--show-toplevel"], 64 * 1024)?;
+    // Remove only Git's terminator; a native root name may itself contain newlines.
+    file_path(root.strip_suffix(b"\n").unwrap_or(&root))
+}
+
 fn changes(path: &Path) -> io::Result<Vec<FileChange>> {
     let output = read_output::complete(
         path,
@@ -125,9 +132,7 @@ fn changes(path: &Path) -> io::Result<Vec<FileChange>> {
 ///
 /// Returns an error if Git cannot inspect the repository or its metadata is malformed.
 pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
-    let root = read_output::complete(path, &["rev-parse", "--show-toplevel"], 64 * 1024)?;
-    // Git terminates this path with one newline; filenames may themselves contain newlines.
-    let root = file_path(root.strip_suffix(b"\n").unwrap_or(&root))?;
+    let root = repository_root(path)?;
     let status = String::from_utf8_lossy(&read_output::complete(
         &root,
         &["status", "--short", "--branch"],
@@ -184,25 +189,35 @@ pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
 ///
 /// Returns an error if the selected change is stale, unsupported or cannot be read by Git.
 /// Unix patch subprocesses also fail on a thirty-second deadline or oversized stderr.
+/// Untracked regular-file capture is bounded to 1 MiB plus one overflow probe byte;
+/// raced leaf/type changes and unsupported ancestor paths can also return I/O errors.
 pub fn diff(path: &Path, selected: &FileChange) -> io::Result<FileDiff> {
+    let root = repository_root(path)?;
+    let path = root.as_path();
     if !changes(path)?.contains(selected) {
         return Err(io::Error::other(
             "File status changed; refresh the repository",
         ));
     }
     if selected.index == '?' {
-        let full = path.join(&selected.path);
-        let metadata = std::fs::symlink_metadata(&full)?;
-        let preview = if metadata.file_type().is_symlink() {
-            format!("Symbolic link → {}", std::fs::read_link(full)?.display())
-        } else if !metadata.is_file() || metadata.len() > 1024 * 1024 {
-            String::from("Preview unavailable: non-regular file or file larger than 1 MiB")
-        } else {
-            let bytes = std::fs::read(full)?;
-            if bytes.contains(&0) {
-                String::from("Binary file")
-            } else {
-                String::from_utf8_lossy(&bytes).into_owned()
+        use working_files::WorkingFile;
+        let preview = match working_files::inspect(path, &selected.path, 1024 * 1024)? {
+            WorkingFile::Symlink(target) => format!("Symbolic link → {}", target.display()),
+            WorkingFile::Unsupported | WorkingFile::TooLarge => {
+                String::from("Preview unavailable: non-regular file or file larger than 1 MiB")
+            }
+            WorkingFile::Missing => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Untracked file changed; refresh the repository",
+                ))
+            }
+            WorkingFile::Regular { bytes, .. } => {
+                if bytes.contains(&0) {
+                    String::from("Binary file")
+                } else {
+                    String::from_utf8_lossy(&bytes).into_owned()
+                }
             }
         };
         return Ok(FileDiff {

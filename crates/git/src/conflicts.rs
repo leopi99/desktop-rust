@@ -4,72 +4,24 @@ use desktop_core::{
     ConflictContent, ConflictReview, ConflictSide, ConflictSideContent, ConflictSidePreview,
     ConflictSideResolutionReview, ConflictWorkingContent, FileChange,
 };
-use std::{
-    ffi::OsStr,
-    fs::OpenOptions,
-    io::{self, Read},
-    path::Path,
-};
+use std::{ffi::OsStr, io, path::Path};
 
 const MAX_TEXT: u64 = 8 * 1024 * 1024;
 
 pub(super) fn working_content(root: &Path, relative: &Path) -> io::Result<ConflictWorkingContent> {
-    let mut parent = relative.parent();
-    while let Some(component) = parent.filter(|p| !p.as_os_str().is_empty()) {
-        match std::fs::symlink_metadata(root.join(component)) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return Err(io::Error::other(
-                    "Conflict paths must not traverse a symlink or non-directory",
-                ))
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
+    use super::working_files::WorkingFile;
+    match super::working_files::inspect(root, relative, MAX_TEXT)? {
+        WorkingFile::Missing => Ok(ConflictWorkingContent::Deleted),
+        WorkingFile::Regular { bytes, executable } => {
+            Ok(ConflictWorkingContent::File { bytes, executable })
         }
-        parent = component.parent();
-    }
-    let path = root.join(relative);
-    let metadata = match std::fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(ConflictWorkingContent::Deleted)
-        }
-        Err(error) => return Err(error),
-    };
-    if !metadata.file_type().is_file() {
-        return Err(io::Error::other(
+        WorkingFile::TooLarge => Err(io::Error::other(
+            "Review supports regular files up to 8 MiB",
+        )),
+        WorkingFile::Symlink(_) | WorkingFile::Unsupported => Err(io::Error::other(
             "Resolve symlink, directory and submodule conflicts using Git",
-        ));
+        )),
     }
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    let file = options.open(&path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_TEXT {
-        return Err(io::Error::other(
-            "Review supports regular text files up to 8 MiB",
-        ));
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_TEXT + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_TEXT {
-        return Err(io::Error::other(
-            "Resolve binary or oversized file conflicts using Git",
-        ));
-    }
-    #[cfg(unix)]
-    let executable = {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    };
-    #[cfg(not(unix))]
-    let executable = false;
-    Ok(ConflictWorkingContent::File { bytes, executable })
 }
 
 fn content(root: &Path, relative: &Path) -> io::Result<ConflictContent> {
