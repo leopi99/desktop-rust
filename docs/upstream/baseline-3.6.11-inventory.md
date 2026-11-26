@@ -350,6 +350,35 @@ EOF/CRLF/native names, stale/locked refusal and guarded UI/capture behavior.
 Broader formats/conversions, partial EOF contracts, the complete upstream test/UI
 surface and interactive/platform QA remain open. No parity checkpoint advances.
 
+## Partial selection with missing final newlines
+
+The pinned [no-newline formatter test](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/test/unit/patch-formatter-test.ts)
+constructs a synthetic diff, selects an added line and asserts that the formatted
+patch includes its addition and a no-newline marker. The previously inspected
+[formatter](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/patch-formatter.ts)
+retains markers associated with included rows. Those assertions do not establish
+actual cached application or exact byte preservation for every partial EOF choice.
+No conclusion about implicit joining behavior is inferred from string presence.
+
+Rust [7b8d969153](https://github.com/leopi99/desktop-rust/commit/7b8d9691535b25a5ffed79c111f616cfef73ab11) replaces the blanket all-changed-rows requirement with independent
+old/new stream validation after selection transformation. A no-newline marker marks
+EOF only for the streams to which its preceding retained row belongs. Any later
+row belonging to an stream already marked at EOF is refused before applying the patch;
+markers for omitted rows stay omitted. Partial selections before unchanged EOF
+context and valid deletions are accepted; silently adding a separator or joining
+lines is not introduced. The UI exposes changed-row controls in no-newline hunks,
+keeps markers nonselectable and explains that adjoining EOF changes may need to be
+selected together. Existing direction, freshness, byte/row and whole-hunk bounds
+remain unchanged.
+
+Four regressions execute real Git operations across old/new newline combinations
+and selection subsets in both directions, verify LF/CRLF context preservation,
+cross-hunk count changes and newline-only/empty-content transitions. Accepted
+choices must produce the exact expected index bytes with the working file intact;
+refused ambiguous choices must preserve the basis. Complete upstream fixture/UI,
+implicit editing/joining semantics and platform QA remain outside this increment.
+No feature or release parity checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -359,7 +388,7 @@ Feature identifiers match `upstream/features.json`.
 | --- | --- | --- |
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
-| stage-commit | Partial complete-hunk apply/formatter/test inspection | Broader formats/partial-EOF behavior, full index/commit selection contracts and original tests. |
+| stage-commit | Partial complete-hunk apply/formatter/test inspection | Broader formats/implicit EOF editing, full index/commit selection contracts and original tests. |
 | repository-read, diff, commit-history | Pending full inventory | Status/diff/history contracts, parsing, limits and original tests. |
 | branches, stash | Partial rename and commit-based creation slices; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |

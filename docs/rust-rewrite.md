@@ -109,7 +109,9 @@ to include a replacement; selecting only one means just that deletion or additio
 For example, staging only the added row of `old` → `new` retains `old` and adds
 `new` after it; staging only the deleted row removes `old` without adding `new`.
 The same rows in a staged review identify the changes to remove from the index.
-Context rows and hunk headers cannot be selected.
+Context rows and hunk headers cannot be selected. Within a contiguous change run,
+retained old rows precede selected additions; choose the full run when the entire
+replacement order matters.
 
 Whole hunks and individual rows can be combined in one action. Choosing a whole
 hunk replaces its individual choices; unchecking one of its checked changed rows
@@ -126,10 +128,17 @@ hunks are checked before the same cached check/apply workflow runs. No working-f
 rewrite, global index reset, three-way fallback or automatic rollback is introduced.
 The complete review, native quoted paths and freshness guards remain unchanged.
 
-A hunk containing a missing-final-newline marker uses whole-hunk controls only.
-The line API also refuses a partial selection of its changed rows; selecting all
-changed rows preserves the exact EOF bytes. CRLF without Git conversion remains
-supported. Larger reviews retain whole-hunk controls up to their original limits.
+Missing-final-newline markers do not block line controls. The reconstructed old
+and new streams are checked independently: once a stream reaches an unterminated
+row, no later row may belong to that stream. This permits partial edits before an
+unchanged unterminated context line and valid EOF deletions without adding bytes.
+A selection that would append after a missing newline is refused before index
+mutation; choose the adjoining EOF changes together or the whole hunk instead.
+For example, adding `new` after retained unterminated `old` would require an
+implicit separator and is refused. Selecting their complete replacement preserves
+its exact bytes. Newline-only changes and transitions to/from empty contents are
+supported. CRLF without Git conversion remains supported. Larger reviews retain
+whole-hunk controls up to their original limits.
 New/deleted/renamed/special/binary files, conversion policies and full interactive
 or platform parity remain outside this scope.
 
