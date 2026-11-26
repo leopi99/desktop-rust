@@ -141,6 +141,23 @@ impl FileChange {
             || matches!((self.index, self.worktree), ('A', 'A') | ('D', 'D'))
     }
 
+    /// Status-only eligibility for an unstaged hunk review, including untracked
+    /// files and working edits to staged additions. File type, HEAD/index absence,
+    /// conversion policy and content limits still require adapter validation.
+    pub fn can_review_unstaged_hunks(&self) -> bool {
+        self.original_path.is_none()
+            && ((self.worktree == 'M' && matches!(self.index, ' ' | 'M' | 'A'))
+                || (self.index == '?' && self.worktree == '?'))
+    }
+
+    /// Status-only eligibility for a staged hunk review of modifications/additions.
+    /// The adapter still validates file kind, patch shape, freshness and limits.
+    pub fn can_review_staged_hunks(&self) -> bool {
+        self.original_path.is_none()
+            && matches!(self.index, 'M' | 'A')
+            && matches!(self.worktree, ' ' | 'M')
+    }
+
     /// Whether full-file staging is available in this preview.
     pub fn can_stage(&self) -> bool {
         !self.is_conflicted() && self.worktree != ' '

@@ -74,6 +74,24 @@ fn optional_output(output: Output) -> io::Result<Option<Vec<u8>>> {
     }
 }
 
+fn comparison_output(output: Output) -> io::Result<Vec<u8>> {
+    if output.status.code() == Some(1) && output.stderr.is_empty() {
+        Ok(output.stdout)
+    } else {
+        successful(output)
+    }
+}
+
+/// Complete bounded no-index diff output. A quiet exit 1 denotes differences;
+/// stderr on exit 1, signals and other failure statuses remain errors.
+pub(super) fn comparison<S: AsRef<OsStr>>(
+    path: &Path,
+    args: &[S],
+    limit: usize,
+) -> io::Result<Vec<u8>> {
+    comparison_output(capture(command(path, args), limit)?)
+}
+
 /// For Git commands whose documented quiet exit 1 specifically denotes absence.
 /// Capture errors, signals, other statuses and diagnostics are never absence.
 pub(super) fn optional<S: AsRef<OsStr>>(
@@ -159,6 +177,22 @@ mod tests {
             } else {
                 assert!(result.is_err());
             }
+        }
+    }
+
+    #[test]
+    fn no_index_comparisons_only_accept_success_or_quiet_difference_status() {
+        for (body, accepted) in [
+            ("printf patch; exit 1", true),
+            ("exit 0", true),
+            ("printf partial; printf failed >&2; exit 1", false),
+            ("printf partial; exit 2", false),
+            ("kill -TERM $$", false),
+        ] {
+            let mut command = std::process::Command::new("sh");
+            command.args(["-c", body]);
+            let result = comparison_output(bounded_output(command, limits(512)).unwrap());
+            assert_eq!(result.is_ok(), accepted);
         }
     }
 

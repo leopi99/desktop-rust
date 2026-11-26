@@ -98,6 +98,12 @@ pub(super) fn patch(review: &HunkReview, selection: &[HunkLine]) -> io::Result<S
                 }
             }
         }
+        if review.side == HunkSide::Staged
+            && super::addition_mode(&review.header).is_some()
+            && old_count > 0
+        {
+            patch = super::partial_addition_header(&review.header)?;
+        }
         let (source_start, source_count, target_count) = match review.side {
             HunkSide::Unstaged => (old_start, old_count, new_count),
             HunkSide::Staged => (new_start, new_count, old_count),

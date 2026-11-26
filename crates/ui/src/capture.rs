@@ -163,18 +163,11 @@ impl Start {
             let change = snapshot
                 .changes
                 .iter()
-                .find(|change| {
-                    change.original_path.is_none()
-                        && match side {
-                            HunkSide::Unstaged => {
-                                change.worktree == 'M' && matches!(change.index, ' ' | 'M')
-                            }
-                            HunkSide::Staged => {
-                                change.index == 'M' && matches!(change.worktree, ' ' | 'M')
-                            }
-                        }
+                .find(|change| match side {
+                    HunkSide::Unstaged => change.can_review_unstaged_hunks(),
+                    HunkSide::Staged => change.can_review_staged_hunks(),
                 })
-                .ok_or("Hunk capture needs an existing tracked text modification")?;
+                .ok_or("Hunk capture needs a supported text modification or addition")?;
             let review = match side {
                 HunkSide::Unstaged => desktop_git::review_hunks(&snapshot.repository.path, change)?,
                 HunkSide::Staged => {

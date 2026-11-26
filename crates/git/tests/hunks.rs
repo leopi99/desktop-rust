@@ -170,7 +170,7 @@ fn stale_contents_index_head_or_policy_never_stage_a_reviewed_hunk() {
 }
 
 #[test]
-fn binary_non_utf8_converted_and_new_files_keep_full_file_staging_only() {
+fn unsupported_formats_and_recreated_paths_keep_full_file_staging_only() {
     for kind in ["binary", "encoding", "filter", "new"] {
         let f = Fixture::new("file", b"base\n", b"edited\n");
         match kind {
@@ -438,15 +438,11 @@ fn staged_reviews_reject_changed_inputs_and_index_lock_failures_without_losing_d
 
 #[test]
 fn staged_patch_limits_and_unsupported_types_never_apply_a_prefix() {
-    for kind in ["binary", "encoding", "new", "deleted", "filter", "large"] {
+    for kind in ["binary", "encoding", "deleted", "filter", "large"] {
         let f = Fixture::new("file", b"base\n", b"edited\n");
         match kind {
             "binary" => std::fs::write(f.file(), b"binary\0bytes").unwrap(),
             "encoding" => std::fs::write(f.file(), b"invalid-\xff\n").unwrap(),
-            "new" => {
-                f.git(&["rm", "--cached", "--", "file"]);
-                f.git(&["commit", "-m", "remove from HEAD"]);
-            }
             "deleted" => std::fs::remove_file(f.file()).unwrap(),
             "large" => std::fs::write(f.file(), vec![b'x'; 600_000]).unwrap(),
             _ => {}
@@ -1251,4 +1247,231 @@ fn selecting_only_a_newline_change_or_empty_file_transition_preserves_exact_eof(
             assert_eq!(std::fs::read(f.file()).unwrap(), work);
         }
     }
+}
+
+fn new_file(bytes: &[u8]) -> Fixture {
+    let mut f = Fixture::new("tracked", b"base\n", b"base\n");
+    f.name = PathBuf::from("new-file");
+    std::fs::write(f.file(), bytes).unwrap();
+    f
+}
+
+#[test]
+fn new_file_review_is_read_only_and_partial_first_commit_preserves_remaining_lines() {
+    for unborn in [false, true] {
+        let f = new_file(b"first\nsecond\nthird\n");
+        if unborn {
+            f.git(&["switch", "--orphan", "first"]);
+        }
+        let basis = f.basis();
+        let index = std::fs::read(f.root.join(".git/index")).ok();
+        let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+        assert_eq!(f.basis(), basis);
+        assert_eq!(std::fs::read(f.root.join(".git/index")).ok(), index);
+        assert!(f.git(&["ls-files", "--", "new-file"]).is_empty());
+        desktop_git::stage_lines(&review, &[row(&review, "+second\n")]).unwrap();
+        assert_eq!(f.index(), b"second\n");
+        assert_eq!(std::fs::read(f.file()).unwrap(), b"first\nsecond\nthird\n");
+        desktop_git::commit(&f.root, "Selected new line", &f.basis()).unwrap();
+        assert_eq!(f.git(&["show", "HEAD:new-file"]), b"second\n");
+        if unborn {
+            assert!(basis.head.is_none());
+            assert_eq!(
+                String::from_utf8(f.git(&["rev-list", "--parents", "-1", "HEAD"]))
+                    .unwrap()
+                    .split_whitespace()
+                    .count(),
+                1
+            );
+        }
+        let remaining = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+        desktop_git::stage_hunks(&remaining, &[0]).unwrap();
+        assert_eq!(f.index(), b"first\nsecond\nthird\n");
+    }
+}
+
+#[test]
+fn staged_additions_can_remove_some_or_all_lines_without_touching_working_bytes() {
+    for executable in [false, true] {
+        let f = new_file(b"first\nsecond\nthird\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                f.file(),
+                std::fs::Permissions::from_mode(if executable { 0o755 } else { 0o644 }),
+            )
+            .unwrap();
+        }
+        f.git(&["add", "--", "new-file"]);
+        let mode = f.git(&["ls-files", "--stage", "--", "new-file"])[..6].to_vec();
+        let review = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+        desktop_git::unstage_lines(&review, &[row(&review, "+second\n")]).unwrap();
+        assert_eq!(f.index(), b"first\nthird\n");
+        assert_eq!(
+            &f.git(&["ls-files", "--stage", "--", "new-file"])[..6],
+            mode
+        );
+        let remaining = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+        if executable {
+            desktop_git::unstage_lines(
+                &remaining,
+                &[row(&remaining, "+first\n"), row(&remaining, "+third\n")],
+            )
+            .unwrap();
+        } else {
+            desktop_git::unstage_hunk(&remaining, 0).unwrap();
+        }
+        assert!(f.git(&["ls-files", "--", "new-file"]).is_empty());
+        assert_eq!(std::fs::read(f.file()).unwrap(), b"first\nsecond\nthird\n");
+    }
+}
+
+#[test]
+fn new_file_native_paths_and_exact_text_survive_partial_stage_and_unstage() {
+    let mut names = vec![
+        PathBuf::from("literal[?]*\t\n name"),
+        PathBuf::from("plain space"),
+    ];
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        names.push(std::ffi::OsString::from_vec(b"native-\xff".to_vec()).into());
+    }
+    for name in names {
+        for bytes in [
+            b"first\r\nsecond\r\nthird\r\n".as_slice(),
+            "first\nsecond è\nthird".as_bytes(),
+        ] {
+            let mut f = new_file(bytes);
+            std::fs::rename(f.file(), f.root.join(&name)).unwrap();
+            f.name = name.clone();
+            let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+            let line = if bytes.contains(&b'\r') {
+                "+second\r\n"
+            } else {
+                "+second è\n"
+            };
+            desktop_git::stage_lines(&review, &[row(&review, line)]).unwrap();
+            assert_eq!(f.index(), &line.as_bytes()[1..]);
+            let remaining = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+            desktop_git::stage_hunk(&remaining, 0).unwrap();
+            assert_eq!(f.index(), bytes);
+            let staged = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+            desktop_git::unstage_lines(&staged, &[row(&staged, line)]).unwrap();
+            let expected = String::from_utf8(bytes.to_vec())
+                .unwrap()
+                .replace(&line[1..], "");
+            assert_eq!(f.index(), expected.as_bytes());
+            assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn unsupported_new_files_never_create_intent_entries_during_review() {
+    for kind in ["empty", "binary", "encoding", "filter", "intent"] {
+        let f = new_file(b"first\nsecond\n");
+        match kind {
+            "empty" => std::fs::write(f.file(), b"").unwrap(),
+            "binary" => std::fs::write(f.file(), b"a\0b").unwrap(),
+            "encoding" => std::fs::write(f.file(), b"a\xffb").unwrap(),
+            "filter" => std::fs::write(
+                f.root.join(".git/info/attributes"),
+                b"new-file filter=fixture\n",
+            )
+            .unwrap(),
+            "intent" => {
+                f.git(&["add", "--intent-to-add", "--", "new-file"]);
+            }
+            _ => unreachable!(),
+        }
+        let basis = f.basis();
+        let index = std::fs::read(f.root.join(".git/index")).unwrap();
+        assert!(
+            desktop_git::review_hunks(&f.root, &f.change()).is_err(),
+            "{kind}"
+        );
+        assert_eq!(f.basis(), basis);
+        assert_eq!(std::fs::read(f.root.join(".git/index")).unwrap(), index);
+    }
+}
+
+#[test]
+fn stale_new_file_reviews_refuse_changes_without_mutating_the_index() {
+    for staged in [false, true] {
+        for mutation in ["working", "index", "head", "attributes", "settings"] {
+            let f = new_file(b"first\nsecond\nthird\n");
+            if staged {
+                f.git(&["add", "--", "new-file"]);
+            }
+            let review = if staged {
+                desktop_git::review_staged_hunks(&f.root, &f.change())
+            } else {
+                desktop_git::review_hunks(&f.root, &f.change())
+            }
+            .unwrap();
+            match mutation {
+                "working" => std::fs::write(f.file(), b"changed\n").unwrap(),
+                "index" => {
+                    std::fs::write(f.root.join("other"), b"other\n").unwrap();
+                    f.git(&["add", "--", "other"]);
+                }
+                "head" => {
+                    f.git(&["commit", "--allow-empty", "-m", "advance"]);
+                }
+                "attributes" => {
+                    std::fs::write(f.root.join(".git/info/attributes"), b"new-file text\n").unwrap()
+                }
+                _ => {
+                    f.git(&["config", "core.safecrlf", "true"]);
+                }
+            }
+            let before = f.basis();
+            let bytes = std::fs::read(f.file()).unwrap();
+            let result = if staged {
+                desktop_git::unstage_lines(&review, &[row(&review, "+second\n")])
+            } else {
+                desktop_git::stage_lines(&review, &[row(&review, "+second\n")])
+            };
+            assert!(result.is_err(), "{staged} {mutation}");
+            assert_eq!(f.basis(), before);
+            assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn oversized_new_file_patch_never_authorizes_a_prefix() {
+    let f = new_file(&vec![b'x'; 513 * 1024]);
+    let before = f.basis();
+    assert!(desktop_git::review_hunks(&f.root, &f.change()).is_err());
+    assert_eq!(f.basis(), before);
+    assert!(f.git(&["ls-files", "--", "new-file"]).is_empty());
+    std::fs::write(f.file(), "line\n".repeat(1025)).unwrap();
+    let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    assert!(!review.line_selection_available());
+    desktop_git::stage_hunk(&review, 0).unwrap();
+    assert_eq!(f.index(), "line\n".repeat(1025).as_bytes());
+}
+
+#[test]
+fn partial_addition_round_trip_preserves_other_staged_paths_and_divergent_work() {
+    let f = new_file(b"first\nsecond\nthird\n");
+    f.git(&["add", "--", "new-file"]);
+    std::fs::write(f.file(), b"first\nsecond\nthird\nworking only\n").unwrap();
+    std::fs::write(f.root.join("other"), b"other staged\n").unwrap();
+    f.git(&["add", "--", "other"]);
+    let review = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+    desktop_git::unstage_lines(&review, &[row(&review, "+second\n")]).unwrap();
+    assert_eq!(f.index(), b"first\nthird\n");
+    let remaining = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    desktop_git::stage_lines(&remaining, &[row(&remaining, "+second\n")]).unwrap();
+    desktop_git::commit(&f.root, "New staged text", &f.basis()).unwrap();
+    assert_eq!(f.git(&["show", "HEAD:new-file"]), b"first\nsecond\nthird\n");
+    assert_eq!(f.git(&["show", "HEAD:other"]), b"other staged\n");
+    assert_eq!(
+        std::fs::read(f.file()).unwrap(),
+        b"first\nsecond\nthird\nworking only\n"
+    );
 }

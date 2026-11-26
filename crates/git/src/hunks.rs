@@ -52,6 +52,69 @@ fn validate_hunk(hunk: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn addition_mode(header: &str) -> Option<bool> {
+    match header.lines().nth(1) {
+        Some("new file mode 100644") => Some(false),
+        Some("new file mode 100755") => Some(true),
+        _ => None,
+    }
+}
+
+// Partial reversal of an addition keeps an existing index file. Retain Git's
+// quoted native destination spelling; a plain modification header preserves mode.
+fn partial_addition_header(header: &str) -> io::Result<String> {
+    let lines: Vec<_> = header.lines().collect();
+    if lines.len() != 5 || addition_mode(header).is_none() {
+        return Err(invalid());
+    }
+    let destination = lines[4].strip_prefix("+++ ").ok_or_else(invalid)?;
+    let source = if let Some(path) = destination.strip_prefix("b/") {
+        format!("a/{path}")
+    } else if let Some(path) = destination.strip_prefix("\"b/") {
+        format!("\"a/{path}")
+    } else {
+        return Err(invalid());
+    };
+    Ok(format!("{}\n--- {source}\n{}\n", lines[0], lines[4]))
+}
+
+fn ensure_untracked_absence(
+    root: &Path,
+    selected: &FileChange,
+    basis: &desktop_core::CommitBasis,
+) -> io::Result<()> {
+    let index = super::read_output::complete(
+        root,
+        &[
+            OsStr::new("ls-files"),
+            OsStr::new("--stage"),
+            OsStr::new("-z"),
+            OsStr::new("--"),
+            selected.path.as_os_str(),
+        ],
+        64 * 1024,
+    )?;
+    let head = match &basis.head {
+        None => Vec::new(),
+        Some(oid) => super::read_output::complete(
+            root,
+            &[
+                OsStr::new("ls-tree"),
+                OsStr::new("-z"),
+                OsStr::new("--full-tree"),
+                OsStr::new(oid.trim()),
+                OsStr::new("--"),
+                selected.path.as_os_str(),
+            ],
+            64 * 1024,
+        )?,
+    };
+    if !index.is_empty() || !head.is_empty() {
+        return Err(io::Error::other("Partial new-file staging requires absence from HEAD and index; use full-file staging for recreated paths"));
+    }
+    Ok(())
+}
+
 fn parse(patch: String) -> io::Result<(String, Vec<String>)> {
     let first = patch
         .find("\n@@ ")
@@ -59,13 +122,19 @@ fn parse(patch: String) -> io::Result<(String, Vec<String>)> {
         .ok_or_else(invalid)?;
     let header = &patch[..first];
     let lines: Vec<_> = header.lines().collect();
-    if lines.len() != 4
-        || !lines[0].starts_with("diff --git ")
-        || !lines[1].starts_with("index ")
-        || !matches!(lines[1].split(' ').next_back(), Some("100644" | "100755"))
-        || !lines[2].starts_with("--- ")
-        || !lines[3].starts_with("+++ ")
-    {
+    let regular = lines.len() == 4
+        && lines[0].starts_with("diff --git ")
+        && lines[1].starts_with("index ")
+        && matches!(lines[1].split(' ').next_back(), Some("100644" | "100755"))
+        && lines[2].starts_with("--- ")
+        && lines[3].starts_with("+++ ");
+    let addition = lines.len() == 5
+        && lines[0].starts_with("diff --git ")
+        && addition_mode(header).is_some()
+        && lines[2].starts_with("index ")
+        && lines[3] == "--- /dev/null"
+        && lines[4].starts_with("+++ ");
+    if !regular && !addition {
         return Err(invalid());
     }
     let mut hunks = Vec::new();
@@ -84,11 +153,15 @@ fn parse(patch: String) -> io::Result<(String, Vec<String>)> {
         validate_hunk(hunk)?;
         hunks.push(hunk.to_owned());
     }
+    if addition && hunks.len() != 1 {
+        return Err(invalid());
+    }
     Ok((header.to_owned(), hunks))
 }
 
-/// Review complete unstaged hunks for one existing regular UTF-8 text file.
-/// Only unrenamed tracked modifications are supported, without content conversions.
+/// Review complete unstaged hunks for a regular UTF-8 modification or new file.
+/// Untracked paths must be absent from HEAD/index; review does not add an intent
+/// entry. Unrenamed modifications to staged additions are also supported.
 /// Patch input is capped at 512 KiB and 128 hunks; file bytes at 8 MiB. This is
 /// distinct from the possibly clipped ordinary display diff.
 ///
@@ -100,7 +173,7 @@ pub fn review_hunks(path: &Path, selected: &FileChange) -> io::Result<HunkReview
     review(path, selected, HunkSide::Unstaged)
 }
 
-/// Review complete staged hunks of one existing regular UTF-8 text file.
+/// Review complete staged hunks of a regular UTF-8 modification or addition.
 /// Each reviewed block can be removed from the index without writing the working
 /// file. Limits and conversion exclusions match the unstaged review.
 ///
@@ -115,18 +188,21 @@ pub fn review_staged_hunks(path: &Path, selected: &FileChange) -> io::Result<Hun
 fn review(path: &Path, selected: &FileChange, side: HunkSide) -> io::Result<HunkReview> {
     let state = super::snapshot(path)?;
     if !state.changes.contains(selected)
-        || selected.original_path.is_some()
         || !match side {
-            HunkSide::Unstaged => selected.worktree == 'M' && matches!(selected.index, ' ' | 'M'),
-            HunkSide::Staged => selected.index == 'M' && matches!(selected.worktree, ' ' | 'M'),
+            HunkSide::Unstaged => selected.can_review_unstaged_hunks(),
+            HunkSide::Staged => selected.can_review_staged_hunks(),
         }
     {
         return Err(io::Error::other(
-            "Hunk operations require an existing, unrenamed tracked modification on the chosen side",
+            "Hunk operations require an unrenamed regular text modification or addition on the chosen side",
         ));
     }
     let root = &state.repository.path;
     super::merge::ensure_idle(root)?;
+    let untracked = selected.index == '?';
+    if untracked {
+        ensure_untracked_absence(root, selected, &state.commit_basis)?;
+    }
     let working = super::conflicts::working_content(root, &selected.path)?;
     if !matches!(&working, ConflictWorkingContent::File {bytes, ..} if !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok())
     {
@@ -158,9 +234,24 @@ fn review(path: &Path, selected: &FileChange, side: HunkSide) -> io::Result<Hunk
     if side == HunkSide::Staged {
         args.push(OsStr::new("--cached"));
     }
-    args.extend([OsStr::new("--"), selected.path.as_os_str()]);
-    let raw = super::read_output::complete(root, &args, 512 * 1024)?;
+    let raw = if untracked {
+        args.extend([
+            OsStr::new("--no-index"),
+            OsStr::new("--"),
+            OsStr::new("/dev/null"),
+            selected.path.as_os_str(),
+        ]);
+        super::read_output::comparison(root, &args, 512 * 1024)?
+    } else {
+        args.extend([OsStr::new("--"), selected.path.as_os_str()]);
+        super::read_output::complete(root, &args, 512 * 1024)?
+    };
     let (header, hunks) = parse(String::from_utf8(raw).map_err(|_| invalid())?)?;
+    if untracked
+        && !matches!(&working,ConflictWorkingContent::File{executable,..} if addition_mode(&header)==Some(*executable))
+    {
+        return Err(invalid());
+    }
     let (current_attributes, current_settings) =
         super::conflicts::conversion_policy(root, &selected.path)?;
     if super::commit_basis(root)? != state.commit_basis

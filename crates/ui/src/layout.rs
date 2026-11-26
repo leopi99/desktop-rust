@@ -68,10 +68,7 @@ impl Desktop {
                         .push(choose_theirs);
                 } else {
                     files = files.push(row![stage, unstage].spacing(6));
-                    if change.worktree == 'M'
-                        && matches!(change.index, ' ' | 'M')
-                        && change.original_path.is_none()
-                    {
+                    if change.can_review_unstaged_hunks() {
                         let mut hunks = button("Review unstaged hunks");
                         if !self.loading {
                             hunks = hunks.on_press(Message::ReviewHunks(change.clone()));
@@ -79,11 +76,7 @@ impl Desktop {
                         files = files.push(hunks);
                     }
                 }
-                if !change.is_conflicted()
-                    && change.index == 'M'
-                    && matches!(change.worktree, ' ' | 'M')
-                    && change.original_path.is_none()
-                {
+                if change.can_review_staged_hunks() {
                     let mut hunks = button("Review staged hunks");
                     if !self.loading {
                         hunks = hunks.on_press(Message::ReviewStagedHunks(change.clone()));
