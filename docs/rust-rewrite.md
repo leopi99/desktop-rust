@@ -51,7 +51,7 @@ automatic stash or remote branch guessing is used. Before the first commit,
 create-and-switch sets the initial branch name; no branch ref exists until commit.
 Commit drafts survive branch changes; a failed creation also retains the branch name.
 
-## Stage or unstage one hunk
+## Stage or unstage selected hunks
 
 For an existing tracked text modification in Changes, choose Review unstaged hunks.
 The app reads a complete, separate patch and displays context-bearing blocks with
@@ -59,6 +59,11 @@ Stage hunk buttons. Each action adds just that block to the index, keeps the wor
 file intact and preserves already staged changes and other files. Commit still
 commits the entire index, so review its contents normally. To stage another block,
 review again after the automatic refresh. Close hunk review discards the choice.
+Use Include hunk checkboxes to select several blocks in the same file, then choose
+Stage selected or Unstage selected below the scrolling review. The action shows
+the selection count and is disabled for an empty selection. Individual Stage hunk
+and Unstage hunk buttons still act only on their named block. Either action consumes
+the review and clears the checkbox selection; review again after refresh.
 The ordinary, potentially clipped diff preview cannot authorize a partial write.
 
 For a staged text modification, choose Review staged hunks and then Unstage hunk.
@@ -72,8 +77,8 @@ This scope accepts unrenamed regular UTF-8 text modifications with unchanged
 Git file mode and no content-conversion policy. New/deleted/renamed files, symlinks,
 submodules, binary/non-UTF-8 data and filters/text/EOL/ident/encoding conversion
 settings require full-file staging or an external Git tool. CRLF bytes without Git
-conversion and no-newline markers are preserved. Choosing several hunks at once
-and selecting individual lines remain planned. Staged review requires a present
+conversion and no-newline markers are preserved. Individual line selection remains
+planned. Staged review requires a present
 regular working file and an existing file modified relative to HEAD; new/deleted
 staged files and staged mode changes remain full-file/external-tool operations.
 
@@ -86,8 +91,11 @@ state, attributes, settings and every patch block must still match. Navigation,
 selection, another preview or refresh invalidates the review. Busy controls cannot
 redirect a write, and commit drafts survive successes and failures.
 
-Git first checks then applies the selected context-bearing patch with apply --cached,
-adding --reverse only for a staged review. There is no checkout, force, three-way merge, rejected-patch output or working-file
+The API accepts a nonempty set of unique valid hunk indices, normalizes them to
+patch order and rejects duplicate or out-of-range choices without staging a prefix.
+Git first checks then applies one patch containing the header and all selected
+context-bearing hunks with apply --cached, adding --reverse only for a staged
+review. It does not loop over separate index writes for each block. There is no checkout, force, three-way merge, rejected-patch output or working-file
 write. Writes share the existing process lock and Git's index lock. External clients
 and configured hooks can still race preflight checks. A write failure refreshes the
 repository and does not automatically roll back over subsequent edits. Read bounds
@@ -358,7 +366,7 @@ history navigation QA remains outstanding.
 
 ## UI transition modules
 
-`crates/ui/src/update/mod.rs` exhaustively routes the application's 88 message
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 90 message
 variants to typed events in ten domain handlers: application/navigation,
 repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
 stashes and completion/refresh. Guard failures explicitly match the relevant

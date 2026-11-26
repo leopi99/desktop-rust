@@ -291,6 +291,34 @@ bytes. UI/capture tests verify directional authority, guarded actions and invali
 Line/multiple selection, complete upstream selection/commit semantics, broader
 formats and interactive/platform QA remain open; no parity checkpoint changes.
 
+## Partial staging: multiple complete hunks in one file
+
+Additional focused pinned evidence:
+[first-and-third-hunk selection test](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/test/unit/patch-formatter-test.ts)
+and [selection-aware formatter tail](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/patch-formatter.ts).
+The inspected test omits the second hunk while retaining the first and third;
+the formatter appends selected changes across hunks and rejects an empty patch.
+Its line selection and coordinate reconstruction support a broader surface than
+this Rust subset; these excerpts are not a full original fixture/UI audit.
+
+Rust [e04ae273d7](https://github.com/leopi99/desktop-rust/commit/e04ae273d79d3fe81a2c157b59f4ff4fc7155dd9) accepts several complete hunks from the same direction-bound
+review. It rejects empty/duplicate/invalid index choices before applying any block,
+orders valid input by original patch position, revalidates the full review once,
+then checks and writes one cached patch, reversed only for unstaging. The index is
+not updated by a per-hunk loop. Git owns its index lock; preflight and the separate
+check/write calls do not fence external clients or configured hook effects.
+
+Checkbox selection starts empty, is tied to the current file/review, and clears on
+review replacement, navigation, refresh, cancellation and any hunk write. The count
+and matching Stage/Unstage selected action remain outside the scrolling blocks.
+Regressions cover first/third selection, mixed insertions/deletions and reverse
+coordinates, remaining staged/working data, invalid/stale/locked refusal,
+128-hunk selection and native-path/CRLF preservation, plus UI guards and capture
+requirements. Line selection, multi-file batches, broader formats and complete
+upstream selection/commit/platform QA remain outside this increment. Existing
+512 KiB/128-hunk/8 MiB limits and conversion exclusions are retained. No feature
+or release parity checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -300,7 +328,7 @@ Feature identifiers match `upstream/features.json`.
 | --- | --- | --- |
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
-| stage-commit | Partial complete-hunk apply/formatter/test inspection | Line/multiple selection, broader formats, full index/commit selection contracts and original tests. |
+| stage-commit | Partial complete-hunk apply/formatter/test inspection | Line selection, broader formats, full index/commit selection contracts and original tests. |
 | repository-read, diff, commit-history | Pending full inventory | Status/diff/history contracts, parsing, limits and original tests. |
 | branches, stash | Partial rename and commit-based creation slices; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |
