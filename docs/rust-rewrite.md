@@ -77,8 +77,7 @@ This scope accepts unrenamed regular UTF-8 text modifications with unchanged
 Git file mode and no content-conversion policy. New/deleted/renamed files, symlinks,
 submodules, binary/non-UTF-8 data and filters/text/EOL/ident/encoding conversion
 settings require full-file staging or an external Git tool. CRLF bytes without Git
-conversion and no-newline markers are preserved. Individual line selection remains
-planned. Staged review requires a present
+conversion and no-newline markers are preserved. Staged review requires a present
 regular working file and an existing file modified relative to HEAD; new/deleted
 staged files and staged mode changes remain full-file/external-tool operations.
 
@@ -93,14 +92,46 @@ redirect a write, and commit drafts survive successes and failures.
 
 The API accepts a nonempty set of unique valid hunk indices, normalizes them to
 patch order and rejects duplicate or out-of-range choices without staging a prefix.
-Git first checks then applies one patch containing the header and all selected
-context-bearing hunks with apply --cached, adding --reverse only for a staged
+Git first checks then applies one patch containing the header and the selected
+context-bearing changes with apply --cached, adding --reverse only for a staged
 review. It does not loop over separate index writes for each block. There is no checkout, force, three-way merge, rejected-patch output or working-file
 write. Writes share the existing process lock and Git's index lock. External clients
 and configured hooks can still race preflight checks. A write failure refreshes the
 repository and does not automatically roll back over subsequent edits. Read bounds
 follow the shared Unix policy; automatic cancellation of stalled local writes and
 native Windows capture guarantees remain separate backlog items.
+
+## Select individual changed lines
+
+Within a hunk review, added and deleted rows have their own checkboxes when the
+complete review fits 64 KiB and 1,024 changed rows. Select both minus and plus rows
+to include a replacement; selecting only one means just that deletion or addition.
+For example, staging only the added row of `old` → `new` retains `old` and adds
+`new` after it; staging only the deleted row removes `old` without adding `new`.
+The same rows in a staged review identify the changes to remove from the index.
+Context rows and hunk headers cannot be selected.
+
+Whole hunks and individual rows can be combined in one action. Choosing a whole
+hunk replaces its individual choices; unchecking one of its checked changed rows
+refines that hunk into the remaining individual rows. The fixed footer then shows
+Stage selected lines or Unstage selected lines and the total number of changed
+rows, including any selected whole hunks. Single-hunk buttons still act only on
+the named hunk. All selections clear with review invalidation or a write; commit
+drafts stay intact.
+
+The app rebuilds context and counts for the selected direction: unselected deleted
+rows become context for staging, and unselected added rows become context for
+unstaging. The opposite unselected rows are omitted. Counts and offsets across
+hunks are checked before the same cached check/apply workflow runs. No working-file
+rewrite, global index reset, three-way fallback or automatic rollback is introduced.
+The complete review, native quoted paths and freshness guards remain unchanged.
+
+A hunk containing a missing-final-newline marker uses whole-hunk controls only.
+The line API also refuses a partial selection of its changed rows; selecting all
+changed rows preserves the exact EOF bytes. CRLF without Git conversion remains
+supported. Larger reviews retain whole-hunk controls up to their original limits.
+New/deleted/renamed/special/binary files, conversion policies and full interactive
+or platform parity remain outside this scope.
 
 ## Create a branch from history
 
@@ -366,7 +397,7 @@ history navigation QA remains outstanding.
 
 ## UI transition modules
 
-`crates/ui/src/update/mod.rs` exhaustively routes the application's 90 message
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 91 message
 variants to typed events in ten domain handlers: application/navigation,
 repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
 stashes and completion/refresh. Guard failures explicitly match the relevant
@@ -749,7 +780,7 @@ Clone, fetch, fast-forward pull, push and upstream setup are implemented as a
 prototype. Current/selected local branch rename, creation at a history commit and
 deleting merged local branches with confirmation are supported. Force deletion
 and in-app authentication remain planned. Diff rendering is monospaced text with
-scoped single-hunk staging/unstaging; line selection, syntax highlighting,
+scoped whole-hunk and individual-line staging/unstaging; syntax highlighting,
 large-diff virtualization and full interactive conflict editing remain planned.
 Automated Git integration tests cover staged/unstaged changes, unborn branches,
 rename, deletion, binary files, conflicts, literal pathspecs and non-UTF-8 paths.

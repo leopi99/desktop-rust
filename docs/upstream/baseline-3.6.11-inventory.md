@@ -319,6 +319,37 @@ upstream selection/commit/platform QA remain outside this increment. Existing
 512 KiB/128-hunk/8 MiB limits and conversion exclusions are retained. No feature
 or release parity checkpoint advances.
 
+## Partial staging: individual changed rows
+
+Focused pinned excerpts inspected again for this slice:
+[selection-aware formatter](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/patch-formatter.ts)
+and [addition-only/preceding-deletions formatter test](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/test/unit/patch-formatter-test.ts).
+The upstream formatter retains context, drops unselected additions, converts
+unselected deletions to context, adjusts counts and emits no-newline markers.
+Its inspected test selects an addition while preceding deletions remain excluded.
+These excerpts are not a full selection-model, original-fixture or UI audit; the
+upstream ordinary commit index-rebuild difference remains as recorded above.
+
+Rust [c1548ebf19](https://github.com/leopi99/desktop-rust/commit/c1548ebf19c96cf556349781ed153936d32918f4) adds forward and reverse selection of changed rows in a
+complete review. Stable coordinates identify the hunk and physical row; headers,
+context and markers cannot be selected. For reverse application the retention
+rules are dual: unselected added rows become context and unselected deleted rows
+are omitted, so the current index remains the source of the reverse patch. Start
+coordinates and counts are reconstructed with checked arithmetic and accumulated
+selected deltas. Empty, duplicate, invalid and stale choices fail before writing.
+The same shared cached check/apply runner executes one patch, preserving working
+files and unrelated index changes in the exercised regressions.
+
+Line controls require the whole review to fit 64 KiB and 1,024 changed rows;
+whole-hunk limits stay unchanged. Partial choices in no-newline hunks are refused;
+all changed rows or the whole hunk remain available. The UI can combine full
+blocks with rows, refine a full block by unchecking a row, and invalidates both
+selection sets together. Regressions include all 15 nonempty subsets of a two-line
+replacement in both directions, replacement-only commits, adjusted offsets, bounds,
+EOF/CRLF/native names, stale/locked refusal and guarded UI/capture behavior.
+Broader formats/conversions, partial EOF contracts, the complete upstream test/UI
+surface and interactive/platform QA remain open. No parity checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -328,7 +359,7 @@ Feature identifiers match `upstream/features.json`.
 | --- | --- | --- |
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
-| stage-commit | Partial complete-hunk apply/formatter/test inspection | Line selection, broader formats, full index/commit selection contracts and original tests. |
+| stage-commit | Partial complete-hunk apply/formatter/test inspection | Broader formats/partial-EOF behavior, full index/commit selection contracts and original tests. |
 | repository-read, diff, commit-history | Pending full inventory | Status/diff/history contracts, parsing, limits and original tests. |
 | branches, stash | Partial rename and commit-based creation slices; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |
