@@ -42,7 +42,7 @@ PR #9 consolidated the Rust quality/runtime/workflow batch on 2026-11-26 at
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
-| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal of text inputs and enabled sidebar navigation on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
+| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal and focus reveal for text inputs/enabled sidebar navigation on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
 | Engine | External Git version/error reports; Unix probe/history/patch deadlines and capture caps, tested on Linux | Windows probe/history/patch/process-tree bounds; stalled-write deadline/cancellation policy; bundled Git/update/capability policy. |
 | Upstream | Weekly discovery, ledger validator, daily watchdog; successful manual runs | Observe scheduled runs, complete initial baseline inventory and port applicable behavior. |
 | Delivery | Linux prototype builds and isolated fixture coverage | Packaging, signing, native account adapters and Windows/macOS release verification. |
@@ -100,6 +100,33 @@ smoke also passed (`/tmp/desktop-rust-nav-smoke-960`). Programmatic focus/captur
 and headless widget events do not establish native keyboard/IME/accessibility QA.
 The root protocol stays at 92 messages; Git action buttons and checkboxes are not
 added to keyboard activation. UI-01/UI-04 and baseline analysis remain open.
+
+Focus visibility follow-up [5c8bb1b3b7](https://github.com/leopi99/desktop-rust/commit/5c8bb1b3b7a678edfda68d9d90d5fe933c3b7154) adds bounds metadata around the current
+text inputs and sidebar buttons without changing their state, layout, pointer
+handling or overlays. A focus move measures the current widget tree and reveals
+the selected region only through its ancestor scroll containers. Nested containers
+are planned from the inside out; adjustments are clamped to content bounds.
+Already visible targets and unrelated scroll regions keep their offsets. Oversized
+targets align their leading edge without oscillation. Unannotated future controls
+retain ordinary focus behavior, and non-finite geometry refuses a scroll plan.
+This scope covers the application's default top-left scroll alignment.
+
+Six new real-Iced-widget regressions cover forward/backward/wrap traversal, nested
+and unrelated containers, stable visible/empty trees, both top-left axes,
+oversized targets and unannotated controls. The read-only `keyboard-scroll-review`
+capture guard is included in the existing capture-context regression. It opens
+Git diagnostics and applies one previous-focus move, without an activation key.
+Before/after own-window captures with long generated repository/branch names show
+the previously offscreen Git navigation button revealed and focused at 960×640
+and 1200×800; fixture signatures remain unchanged
+(`/tmp/desktop-rust-focus-reveal-gok0j7jo/captures`). Native keyboard delivery,
+non-default scroll anchors, panel focus handover, Git action buttons/checkboxes,
+virtualized-list semantics and accessibility acceptance remain open.
+The complete increment passed 426 Rust tests (125 UI), 10 compiler/policy tests,
+32 upstream tests, formatter, all-target/all-feature Clippy, warning-free rustdoc
+and npm lint. The minimum-size eight-panel/three-failure smoke passed with
+unchanged fixture data (`/tmp/desktop-rust-focus-reveal-smoke-960`). The root UI
+protocol remains 92 messages, reusing the existing focus operation route.
 
 ## Merged batch: Rust quality and process hardening
 

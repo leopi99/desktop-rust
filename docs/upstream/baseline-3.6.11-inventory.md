@@ -536,6 +536,30 @@ fixture state; they do not verify native key delivery. Complete sidebar/caller
 inventory, screen-reader semantics, scrolling/panel focus handover, IME/HiDPI and
 native interaction remain open in UI-01/UI-04. No upstream checkpoint advances.
 
+## Focus visibility inside scroll containers
+
+Focused pinned [List excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/lib/list/list.tsx)
+restore an explicitly requested/selected row on mount when no explicit scroll-top
+value takes priority, and react to requested-row changes. The helper also clears
+cached row focus when focus leaves the list. These are virtualized-list/caller
+contracts, not proof of a general form-focus scroll policy.
+
+Rust [5c8bb1b3b7](https://github.com/leopi99/desktop-rust/commit/5c8bb1b3b7a678edfda68d9d90d5fe933c3b7154) adds bounds-only annotations to existing text inputs and
+sidebar navigation. A focus operation records its target and ancestor scroll path
+from the current Iced widget tree, then applies minimal clamped offsets inside-out.
+Only ancestors are adjusted. Visible targets, unrelated panes and empty forms stay
+put; oversized controls align their leading edge. No annotation means ordinary
+focus with no scroll guess. Non-finite geometry declines scrolling. This scope is
+for the current default top-left anchors, not arbitrary scroll alignment.
+
+Six new real-widget regressions cover traversal/wrap, nested and unrelated panes,
+visible/empty forms, both axes, oversized and unannotated targets. Read-only
+programmatic captures at two sizes show a previously offscreen sidebar button
+revealed, with unchanged Git/working state. Native key delivery, virtualized lists,
+explicit caller scroll restoration, non-default anchors, panel handover and full
+accessibility/platform contracts remain open. This is preview usability work;
+UI-01/UI-05 and baseline analysis stay open and no checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.

@@ -760,9 +760,17 @@ focus, changing modifiers, disabling or changing the button target cancels its
 armed activation. Navigation uses the existing busy guard and draft/review rules.
 Pointer/touch clicks retain their existing behavior. This extension covers panel
 navigation; Git action buttons and checkboxes retain their existing controls.
-Native keyboard delivery, scrolling/panel focus handover, IME/HiDPI and complete
-accessibility/manual acceptance remain pending. Automated checks exercise real
-Iced widgets/events with a headless renderer.
+After a focus move, the focused field or sidebar control is brought into view
+through its own scroll containers with the minimum clamped adjustment. Nested
+containers are handled from the inside out. Other panes and already visible
+controls keep their scroll position; an oversized control aligns its leading edge.
+This covers the default top-left alignment used by the current views. Focus still
+works for future controls without bounds metadata, but those controls need an
+annotation to be revealed automatically.
+
+Native keyboard delivery, panel focus handover, non-default scroll anchors,
+IME/HiDPI and complete accessibility/manual acceptance remain pending. Automated
+checks exercise real Iced widgets/events with a headless renderer.
 
 Developer launch options accept a repository, panel and window size:
 
@@ -782,6 +790,12 @@ path. The first two frames move focus from the repository input to the first
 enabled sidebar button; the fourth frame captures the window. No activation key
 is injected, no panel navigation is requested and no Git data is written. This
 checks rendered focus, not native keyboard delivery.
+
+`--panel keyboard-scroll-review` similarly requires a repository and fresh capture
+path. It opens Git diagnostics and applies one backward focus move to the last
+sidebar button, then captures the window. Use a disposable repository with long
+repository/branch labels to exercise scrolling. It performs no key activation or
+Git write; the focus move reveals the control through its existing scroll view.
 
 A repeatable offline fixture captures all seven panels, a read-only branch
 deletion review, missing-Git diagnostics and Unix timeout/output-overflow cases
