@@ -25,9 +25,23 @@ not Git's own memory. Windows still buffers the full patch before clipping and
 has no equivalent patch deadline (PLAT-01). The preceding status read has its
 own 8 MiB capture cap and Unix deadline. These separate limits are not one
 deadline for the entire `diff` operation. Selecting Stage still stages the complete current file.
-Untracked text files have a preview up to 1 MiB; binary files are identified,
-and symbolic links show their target rather than following it. Refresh reloads
-status and history. Paths retain their filesystem encoding on Unix.
+Regular untracked files up to 1 MiB can be previewed; binary contents within that
+bound are identified without text rendering. The read itself is capped at the
+limit plus one overflow probe byte, including when the file grows after metadata
+inspection. Oversized/growing files have no accepted partial prefix and retain
+full-file staging. Symbolic links show their target spelling without reading its
+contents. Refresh reloads status and history. Paths retain their native encoding.
+Preview requests from a repository subdirectory resolve root-relative selected
+paths against Git's actual working-tree root, including root names with newlines.
+
+Untracked preview and conflict/hunk working-content capture share the bounded
+filesystem reader. Conflict/hunk capture retains its 8 MiB limit. Ancestor symlinks
+and non-directories are refused; Unix final-component opens use no-follow and
+nonblocking flags, with regular-file descriptor checks before reading. Ancestors
+are rechecked after opening, but these checks do not fence external renames.
+Windows retains best-effort metadata/type checks without the Unix leaf guarantee.
+The byte bounds do not impose a deadline on regular/network filesystem I/O; they
+are separate from the bounded Git subprocess reads described above.
 Repository operations run on a worker thread. Stage and Unstage act on a single
 file and preserve working-tree contents when unstaging. Enter a summary and optional
 description to commit **all staged changes**, including files staged outside the app.

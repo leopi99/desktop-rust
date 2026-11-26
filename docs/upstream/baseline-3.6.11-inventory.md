@@ -379,6 +379,36 @@ refused ambiguous choices must preserve the basis. Complete upstream fixture/UI,
 implicit editing/joining semantics and platform QA remain outside this increment.
 No feature or release parity checkpoint advances.
 
+## Working-file preview bounds and repository-root binding
+
+Focused pinned [working-directory diff excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/diff.ts)
+were inspected: added/untracked non-submodule text diff uses Git's no-index route
+against the null path and accepts its changes-found exit status. The separate
+working-directory image helper reads filesystem bytes for image presentation.
+Those are different workflows; this inspection does not establish their full
+caller/budget/platform contracts or implement image support in Rust.
+
+The [prior Rust plain-content preview](https://github.com/leopi99/desktop-rust/blob/3fa13a1a58aa0d8c15a677fe292e5fd02c05fcf5/crates/git/src/lib.rs)
+checked untracked file size and then used an unbounded filesystem read. A file
+changing after that metadata check could bypass the intended capture bound.
+Rust [d3d72cc76f](https://github.com/leopi99/desktop-rust/commit/d3d72cc76fa2731cc814511254782dc8cdf551d7) replaces that path with a shared regular-file reader bounded
+to the requested bytes plus one overflow probe, rejecting an incomplete prefix.
+Untracked preview uses 1 MiB; conflict/hunk working-content capture uses 8 MiB.
+Unix leaf opens use no-follow/nonblocking flags; type checks reject non-regular
+descriptors before reading. Ancestors are checked before and after opening, but
+external component renames are not fenced. Symlink preview displays target spelling
+without reading target contents. Windows retains best-effort checks, and regular
+filesystem I/O has no automatic deadline.
+
+Snapshot and preview share bounded Git-root resolution. A preview requested from
+a subdirectory uses root-relative selected paths consistently for tracked patches
+and untracked files, without lossy native-path conversion. Regression evidence
+covers read budgets/growing streams, late errors, symlink/type guards, native root
+names, bounds, unchanged index/files/config and full staging after overflow refusal.
+This is Rust hardening of its plain-content preview, not an upstream no-index diff
+or image port and not a parity checkpoint advance. Complete diff/image/platform
+contracts and descriptor-relative ancestor handling remain outside this scope.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.

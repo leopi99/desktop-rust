@@ -88,7 +88,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 377 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 386 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -264,6 +264,21 @@ hunks were captured and visually inspected in both directions at 960×640 and
 minimum-size smoke also passed (`/tmp/desktop-rust-eof-smoke-960`). Captures do not
 replace interaction/accessibility or native platform QA. Ambiguous line joining
 is deliberately refused; broader contracts and full baseline analysis remain open.
+Working-file reader hardening ([d3d72cc76f](https://github.com/leopi99/desktop-rust/commit/d3d72cc76fa2731cc814511254782dc8cdf551d7), 2026-11-26) passed 386 Rust tests
+(including 107 UI state/capture-option tests), 32 upstream and 10 compiler/policy
+tests plus formatter/Clippy/rustdoc/npm lint. Four unit regressions verify exact
+read/probe budgets even for an endless growing stream, late I/O failure, invalid
+relative paths, symlink ancestor/leaf refusal and non-regular file handling. Five
+new Git regressions cover empty/text/binary/exact/oversized previews, full staging
+after a refused preview, symlink target labels, root/subdirectory equivalence,
+native names and stale parent replacement with unchanged user data. The initial
+metadata check no longer authorizes an unbounded filesystem read. Existing
+conflict/hunk regression coverage runs through the same reader, retaining 8 MiB.
+The general minimum-size panel smoke passed with unchanged fixtures
+(`/tmp/desktop-rust-working-files-smoke-960`); no UI layout changed in this increment.
+Ancestor checks remain preflight; no descriptor-relative fencing, regular/network
+filesystem deadline or native Windows leaf guarantee is claimed. R-07 is locally
+complete in this scope; G-01 and platform verification remain open.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.
