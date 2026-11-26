@@ -738,24 +738,34 @@ No credentials or original application databases are imported.
 
 ## UI layout and visual checks
 
-The sidebar separates Changes, History, Branches, Remotes, Saved changes,
-Create / Clone and Git diagnostics. File lists and diffs occupy the main workspace; commit fields
-appear only in Changes. A merge/rebase banner keeps operation controls reachable
+Toolbar controls, Changes/History tabs and footer links separate the seven panels.
+File lists and diffs occupy the main workspace; commit fields appear only in Changes. A merge/rebase banner keeps operation controls reachable
 while resolving files. Navigation preserves drafts and revokes hidden previews
 and abort/remove confirmations. Busy operations keep their current panel.
 
 The default window is 1200×800 with a minimum of 960×640. A renderer layer clips
-sidebar content, including long paths with the software renderer. Views live in
-`crates/ui/src/layout.rs`; Git operations and their freshness checks are unchanged.
+file rows and toolbar content, including long paths with the software renderer.
+Views live in `crates/ui/src/layout.rs`, shared chrome in `layout/shell.rs`, colors
+in `appearance.rs` and bounded read-only patch rendering in `diff_view.rs`. Git
+operations and their freshness checks are unchanged.
+
+The light workspace now follows GitHub Desktop's main arrangement: repository,
+branch and remote controls in a dark toolbar; Changes/History lists; commit inputs
+under the file column; selected-file actions and a flexible diff pane. Open or
+refresh a repository from Create / Clone (also available through the repository
+toolbar), or the welcome view. Saved changes and Git diagnostics remain in the
+footer. See [the UI direction and captures](rust/ui-design.md) for scope and next
+steps. The first pass retains explicit stage/unstage and existing confirmations;
+upstream's commit-inclusion checkboxes and dropdown/dialog flows are not ported.
 
 Tab and Shift+Tab cycle forward/backward through the current text inputs and
-enabled sidebar panel buttons, changed-file buttons and read-only review controls,
+enabled panel navigation controls, changed-file buttons and read-only review controls,
 in widget-tree order. Disabled navigation controls
 are skipped. Only otherwise unhandled Tab presses are mapped; Ctrl/Alt/Super
 combinations and captured keys retain their existing behavior. The sole focused
 input retains its cursor on a full cycle.
 
-A focused sidebar button has a visible outline. Press and release Enter or Space
+A focused navigation button has a visible outline. Press and release Enter or Space
 to open its panel; holding/repeating the key does not repeatedly navigate. Losing
 focus, changing modifiers, disabling or changing the button target cancels its
 armed activation. Navigation uses the existing busy guard and draft/review rules.
@@ -783,7 +793,7 @@ other panels and busy operations are ignored. With no applicable review it is a
 no-op. Escape never requests transfer cancellation or merge/rebase abort. Closing
 a hunk review clears its hunk/line selection while preserving commit drafts.
 
-After a focus move, the focused field or sidebar control is brought into view
+After a focus move, the focused field or navigation control is brought into view
 through its own scroll containers with the minimum clamped adjustment. Nested
 containers are handled from the inside out. Other panes and already visible
 controls keep their scroll position; an oversized control aligns its leading edge.
@@ -816,16 +826,17 @@ Interactive repository operations continue to use worker threads.
 
 For a read-only focus-ring capture on a disposable repository, use
 `--panel keyboard-nav-review` with both `--repository` and a fresh `--capture`
-path. The first two frames move focus from the repository input to the first
-enabled sidebar button; the fourth frame captures the window. No activation key
+path. The first two frames move focus twice through the current tree (repository
+and branch toolbar controls in the new shell); the fourth frame captures the window. No activation key
 is injected, no panel navigation is requested and no Git data is written. This
 checks rendered focus, not native keyboard delivery.
 
 `--panel keyboard-scroll-review` similarly requires a repository and fresh capture
 path. It opens Git diagnostics and applies one backward focus move to the last
-sidebar button, then captures the window. Use a disposable repository with long
-repository/branch labels to exercise scrolling. It performs no key activation or
-Git write; the focus move reveals the control through its existing scroll view.
+focusable control, normally the Git footer link in the new shell, then captures
+the window. Long repository/branch labels now exercise toolbar clipping; an
+already visible target needs no scroll adjustment. It performs no key activation
+or Git write.
 
 A repeatable offline fixture captures all seven panels, a read-only branch
 deletion review, missing-Git diagnostics and Unix timeout/output-overflow cases

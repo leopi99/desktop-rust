@@ -42,7 +42,7 @@ PR #9 consolidated the Rust quality/runtime/workflow batch on 2026-11-26 at
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
-| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal and focus reveal for text inputs, enabled sidebar navigation, review checkboxes and changed-file/read-review buttons on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
+| UI | Desktop-like light shell and Changes/History lists, numbered/colored diffs, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal and focus reveal for text inputs, enabled sidebar navigation, review checkboxes and changed-file/read-review buttons on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
 | Engine | External Git version/error reports; Unix probe/history/patch deadlines and capture caps, tested on Linux | Windows probe/history/patch/process-tree bounds; stalled-write deadline/cancellation policy; bundled Git/update/capability policy. |
 | Upstream | Weekly discovery, ledger validator, daily watchdog; successful manual runs | Observe scheduled runs, complete initial baseline inventory and port applicable behavior. |
 | Delivery | Linux prototype builds and isolated fixture coverage | Packaging, signing, native account adapters and Windows/macOS release verification. |
@@ -240,6 +240,39 @@ unchanged file/index/config/status/ref signatures
 (`/tmp/desktop-rust-review-dismiss-final-captures-bd3xxyvi`). These are resting
 captures, not native keyboard execution. UI-01/UI-09, focus restoration after
 removal and full accessibility/IME/HiDPI remain open; no upstream checkpoint moves.
+
+### Desktop-like visual workspace
+
+Visual increment [095959c636](https://github.com/leopi99/desktop-rust/commit/095959c636e86c15666d518b5b51042e9e52437e) replaces the broad vertical application menu and repeated
+per-file action blocks with a dark repository/branch/remote toolbar, compact
+Changes/History lists, fixed file/commit column and flexible detail pane. Commit
+inputs sit under the file list; actions appear for the selected file. The common
+shell, light palette and bounded read-only diff renderer live in separate modules.
+Diffs show old/new gutters and addition/deletion colors; routine file/index headers
+and empty sections are omitted while metadata-like changed code remains visible.
+Hunk selection uses corresponding colored full-width rows.
+
+Selected-file state is presentation only and retains native FileChange values;
+read requests/results set it, while refresh/repository/navigation/dismissal revoke
+it. Existing busy, draft, immutable-review and explicit-write guards remain in
+use. No new root UI message (still 93), dependency or Git adapter changes. Five
+new state/presentation regressions cover busy selection, invalidation, review
+results/cancellation, metadata-like source lines and Unicode/coordinate bounds.
+The full local gate passes 453 Rust tests (152 UI), 10 compiler/policy tests,
+formatter, all-target/all-feature Clippy and warning-free rustdoc. All 32 upstream
+tests, the registry validator and npm lint pass. Logs use the prefix
+`/tmp/desktop-rust-visual-`. Programmatic toolbar-focus captures at both sizes
+show the white outline on the dark header with unchanged fixture data; they do
+not establish native key delivery.
+
+The eight-panel/three-diagnostic smoke passes with unchanged fixture signatures
+at 960×640 and 1200×800 (`/tmp/desktop-rust-visual-final-960`,
+`/tmp/desktop-rust-visual-final-1200`). All minimum-size panels and both-size
+Changes/History and hunk/conflict captures were visually inspected. Additional
+clean/long-toolbar captures preserve their fixture data
+(`/tmp/desktop-rust-visual-final-reviews-hv4p864j`). [The UI direction](ui-design.md)
+links committed captures and records the remaining visual milestones. There is
+no native interaction/accessibility claim and no upstream checkpoint advances.
 
 ## Merged batch: Rust quality and process hardening
 

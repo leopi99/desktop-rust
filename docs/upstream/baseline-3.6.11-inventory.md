@@ -675,3 +675,28 @@ This does not implement modal focus trapping, nested dialog ownership, close
 shortcuts, upstream appearance timing, arbitrary popup dismissal or native
 accessibility. UI-01/UI-09 and full baseline analysis remain open; no checkpoint
 advances.
+
+## Desktop-like visual workspace pass
+
+Selected pinned [toolbar styles](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/styles/ui/toolbar/_toolbar.scss)
+lay out a fixed-height horizontal toolbar with sidebar and branch/remote sections.
+[Theme variables](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/styles/_variables.scss)
+define a 50 px dark toolbar, compact system typography, bordered surfaces and
+separate diff addition/deletion/gutter colors. The [commit component styles](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/styles/ui/changes/_commit-message.scss)
+place a nonshrinking composer after the change list with a top border, alternate
+background and automatic top margin. These are targeted visual helper reads, not
+a complete audit of Desktop's view composition, controls or interaction tests.
+
+The Rust pass adopts that arrangement with a 56 px toolbar and fixed 292 px
+file/commit column, light surfaces, compact Changes/History rows and a colored,
+numbered read-only diff. Selected-file actions use existing guarded messages.
+Native file identity remains separate from labels; refresh/navigation/dismissal
+clear presentation selection. Metadata-like source lines are preserved inside
+hunks. Five state/presentation regressions supplement resting captures and
+unchanged-data smoke checks. [The UI direction](../rust/ui-design.md) records
+committed captures, intentional differences and the remaining visual milestones.
+
+This does not port toolbar dropdowns, upstream file-inclusion semantics, a
+multiline description editor, modal/menu lifecycle, dark/system theme selection,
+syntax/image/side-by-side diff or accessibility. UI-01/UI-10 and the full baseline
+remain open. Styling and captures do not advance an upstream checkpoint.
