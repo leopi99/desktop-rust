@@ -24,11 +24,7 @@
         "git",
         "branch-delete-review"
       ],
-      "diagnostic_cases": [
-        "git-missing",
-        "git-timeout",
-        "git-noisy"
-      ],
+      "diagnostic_cases": ["git-missing", "git-timeout", "git-noisy"],
       "fixture_unchanged": true,
       "note": "Rendered captures require human visual review; this is not an interaction or accessibility test."
     },
@@ -44,11 +40,7 @@
         "git",
         "branch-delete-review"
       ],
-      "diagnostic_cases": [
-        "git-missing",
-        "git-timeout",
-        "git-noisy"
-      ],
+      "diagnostic_cases": ["git-missing", "git-timeout", "git-noisy"],
       "fixture_unchanged": true,
       "note": "Rendered captures require human visual review; this is not an interaction or accessibility test."
     }

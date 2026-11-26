@@ -2,7 +2,8 @@
 
 Updated: 2026-11-26. Target: `quality/rust-foundations` into `development`.
 This milestone freezes the accumulated engineering work for one consolidated
-review. Further feature extensions follow in a new batch after consolidation.
+review. [PR #9](https://github.com/leopi99/desktop-rust/pull/9) is open as draft with `needs-deep-review`; author assessment
+and additional in-depth human review are pending. Further feature extensions follow in a new batch after consolidation.
 It is a prototype milestone, not an alpha release or upstream parity attestation.
 
 ## Scope and review order

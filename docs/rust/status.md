@@ -88,8 +88,8 @@ Default-branch CI activation follows the batch merge.
 
 ## Consolidation and alpha acceptance
 
-The accumulated implementation is frozen for one milestone PR against
-`development`; see [review order and boundaries](consolidation.md). The new
+The accumulated implementation is frozen in [PR #9](https://github.com/leopi99/desktop-rust/pull/9) (draft,
+`needs-deep-review`) against `development`; see [review order and boundaries](consolidation.md). The new
 `script/rust-ui-fixture.py` prepares four isolated offline repositories for
 changes/staging, branches/stash, merge conflict and paused rebase. Initial Git
 states, read-only inspection and refusal to overwrite existing roots are verified.
