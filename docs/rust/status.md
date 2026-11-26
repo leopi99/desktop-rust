@@ -42,7 +42,7 @@ PR #9 consolidated the Rust quality/runtime/workflow batch on 2026-11-26 at
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
-| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal and focus reveal for text inputs/enabled sidebar navigation on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
+| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal and focus reveal for text inputs, enabled sidebar navigation and review checkboxes on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
 | Engine | External Git version/error reports; Unix probe/history/patch deadlines and capture caps, tested on Linux | Windows probe/history/patch/process-tree bounds; stalled-write deadline/cancellation policy; bundled Git/update/capability policy. |
 | Upstream | Weekly discovery, ledger validator, daily watchdog; successful manual runs | Observe scheduled runs, complete initial baseline inventory and port applicable behavior. |
 | Delivery | Linux prototype builds and isolated fixture coverage | Packaging, signing, native account adapters and Windows/macOS release verification. |
@@ -149,6 +149,33 @@ captures were visually inspected at 960×640 and 1200×800 with unchanged fixtur
 signatures (`/tmp/desktop-rust-field-identity-focus-vx4h8iz0`). The root protocol
 remains 92 messages. Native keyboard/IME/accessibility and complete panel-focus
 restoration remain open in UI-01/UI-06; no upstream checkpoint advances.
+
+### Review-checkbox keyboard selection
+
+Increment [0fcfd94adb](https://github.com/leopi99/desktop-rust/commit/0fcfd94adb41da0087ebf9b1f4417d12971afb9b) adds hunk/changed-line checkboxes to cyclic Tab/Shift+Tab traversal
+and annotated focus reveal. Plain Space toggles once on release; Enter does not
+toggle or apply. Modifier changes, another key, focus loss, disabling, or replacing
+the exact immutable review instance/typed coordinate cancels an armed gesture.
+Same-review redraws retain focus. Existing Iced pointer behavior and selection
+messages remain in use; Git application is a separate explicit action.
+
+Five new real-widget/event regressions cover mixed traversal and disabled/write
+button exclusion, repeats/release, redraw and review/coordinate replacement,
+interruption/modifiers/Enter, pointer/touch and late busy delivery. Selection-only
+application preserves drafts and review ownership without starting a worker.
+The full local gate passes 436 Rust tests (135 UI), 10 compiler/policy tests,
+formatter, all-target/all-feature Clippy and warning-free rustdoc. All 32 upstream
+tests, the registry validator and npm lint also pass. Logs use the prefix
+`/tmp/desktop-rust-checkbox-`. No root message, dependency, Git adapter or write
+protocol changes.
+
+The eight-panel/three-failure smoke passes at 960×640 with unchanged data
+(`/tmp/desktop-rust-checkbox-smoke-960`). Read-only selected-line captures at
+960×640 and 1200×800 were visually inspected with identical before/after file,
+index, config, status and ref signatures
+(`/tmp/desktop-rust-checkbox-captures-bg1wcf8v`). These captures show selection
+layout, not native keyboard delivery or a focused-checkbox session. UI-01/UI-07,
+full accessibility/IME/HiDPI and baseline analysis remain open; no checkpoint moves.
 
 ## Merged batch: Rust quality and process hardening
 

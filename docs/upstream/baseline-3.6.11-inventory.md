@@ -604,3 +604,26 @@ For each slice, collect immutable source/test references, caller-shaped contract
 Git argument/status/config semantics, platform dependencies and corresponding Rust
 implementation/test evidence. Record gaps in the backlog; classify ledger records
 with the required source and Rust review evidence before advancing checkpoints.
+
+## Review-checkbox keyboard selection in the Linux preview
+
+The pinned [checkbox component](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/lib/checkbox.tsx)
+uses an HTML checkbox input, forwards disabled/tabIndex/ARIA metadata and change
+events, keeps a mounted input ID, exposes focus, and updates checked/indeterminate
+state. It suppresses double-click propagation. This source observation does not
+establish all callers, platform keyboard delivery or the full review-selection
+contract; those callers and tests remain outside this slice.
+
+The Rust preview retains Iced pointer selection and adds Tab/Shift+Tab focus plus
+plain Space activation on release for hunk and changed-line checkboxes. Enter
+never toggles or applies a patch. Focus/armed state belongs to an exact immutable
+review Arc and typed hunk/line coordinate; replacing either or disabling the
+control drops that state. Same-coordinate redraws preserve it. Existing selection
+messages and busy/panel guards are reused; applying a patch remains a separate
+action. No root message, dependency, Git adapter or write protocol changes.
+
+Five real-Iced-widget/event regressions check mixed traversal, repeat/release,
+redraw and retarget/interruption behavior, modifiers/Enter, pointer/touch and
+selection-only delivery preserving drafts. This does not port DOM accessibility,
+tri-state values, double-click propagation or all upstream selection semantics.
+UI-01/UI-07 and the complete baseline remain open; no checkpoint advances.

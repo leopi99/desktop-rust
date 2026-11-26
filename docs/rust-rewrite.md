@@ -759,7 +759,15 @@ to open its panel; holding/repeating the key does not repeatedly navigate. Losin
 focus, changing modifiers, disabling or changing the button target cancels its
 armed activation. Navigation uses the existing busy guard and draft/review rules.
 Pointer/touch clicks retain their existing behavior. This extension covers panel
-navigation; Git action buttons and checkboxes retain their existing controls.
+navigation; Git action buttons retain their existing controls.
+
+Hunk-review checkboxes participate in Tab/Shift+Tab navigation and focus reveal.
+Press and release Space to include/exclude a hunk or changed line; Enter does not
+toggle them. A held Space toggles once on release. Focus loss, modifiers, another
+key, disabling, or changing the exact review/coordinate cancels the gesture.
+Ordinary redraws retain focus for the same review coordinate. Selection only
+updates the review: use the separate Stage/Unstage action to apply it.
+
 After a focus move, the focused field or sidebar control is brought into view
 through its own scroll containers with the minimum clamped adjustment. Nested
 containers are handled from the inside out. Other panes and already visible

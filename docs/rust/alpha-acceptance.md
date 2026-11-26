@@ -78,6 +78,7 @@ status alone as proof that the right content was committed.
 | Sidebar focus/activation | Implemented; mixed traversal, release/repeat/interruption guards, disabled/retargeted controls, mouse/touch and late busy delivery have automated widget coverage. Programmatic focus-ring captures visually checked at both sizes; native keyboard session pending. |
 | Focus reveal in scroll views | Implemented for annotated inputs/sidebar controls with default top-left anchors. Six real-widget regressions and before/after own-window captures pass; native keyboard and non-default anchor behavior remain unverified. |
 | Field identity/handover | Current inputs have typed purpose/context IDs. Automated widget/event checks cover redraw preservation, retarget/reorder reset and blocked typing into a replacement field. Native panel transitions and restoration across removed fields remain pending. |
+| Hunk/line checkbox keyboard selection | Implemented; five automated widget/event regressions cover Tab traversal, Space release/repeats, exact-review/coordinate invalidation, interruption and selection-only delivery. Enter does not apply or toggle. Actual native keyboard/accessibility execution remains pending. |
 | Native Windows/macOS, full accessibility/IME/HiDPI verification | Not run. |
 
 ## Alpha exit conditions
