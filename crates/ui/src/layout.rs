@@ -4,7 +4,7 @@ use super::{
     Desktop, Message, Panel,
 };
 use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
-use iced::widget::{button, checkbox, column, pick_list, row, scrollable, text, text_input};
+use iced::widget::{button, column, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length};
 
 impl Desktop {
@@ -437,14 +437,14 @@ impl Desktop {
                 if !self.loading {
                     stage = stage.on_press(message);
                 }
-                let mut selection = checkbox(
+                let selection = crate::selection::checkbox(
                     format!("Include hunk {}", index + 1),
+                    review,
+                    crate::selection::Target::Hunk(index),
                     self.selected_hunks.contains(&index),
+                    !self.loading,
+                    false,
                 );
-                if !self.loading {
-                    selection =
-                        selection.on_toggle(move |selected| Message::ToggleHunk(index, selected));
-                }
                 if line_controls {
                     if hunk.lines().any(|row| row.starts_with("\\ No newline")) {
                         contents=contents.push(text("Missing final newline: adjoining EOF changes may need to be selected together.").size(14));
@@ -454,13 +454,14 @@ impl Desktop {
                             let coordinate = crate::HunkLine { hunk: index, line };
                             let checked = self.selected_hunks.contains(&index)
                                 || self.selected_lines.contains(&coordinate);
-                            let mut choose = checkbox(row.trim_end_matches(['\r', '\n']), checked)
-                                .font(iced::Font::MONOSPACE);
-                            if !self.loading {
-                                choose = choose.on_toggle(move |selected| {
-                                    Message::ToggleHunkLine(coordinate, selected)
-                                });
-                            }
+                            let choose = crate::selection::checkbox(
+                                row.trim_end_matches(['\r', '\n']),
+                                review,
+                                crate::selection::Target::Line(coordinate),
+                                checked,
+                                !self.loading,
+                                true,
+                            );
                             contents = contents.push(choose);
                         } else {
                             contents = contents.push(

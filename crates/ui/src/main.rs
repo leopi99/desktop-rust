@@ -5,6 +5,7 @@ mod focus_region;
 mod keyboard;
 mod layout;
 mod navigation;
+mod selection;
 mod update;
 
 use desktop_core::{
@@ -1404,7 +1405,7 @@ mod tests {
         assert!(!app.abort_rebase_pending);
         assert!(app.rebase_preview.is_some());
     }
-    fn hunk_app() -> Desktop {
+    pub(super) fn hunk_app() -> Desktop {
         let mut app = loaded();
         let snapshot = app.snapshot.as_ref().unwrap();
         let review = HunkReview {
