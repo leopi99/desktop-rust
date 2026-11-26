@@ -1,4 +1,7 @@
 //! Transparent bounds metadata for keyboard focus inside scrollable widgets.
+mod identity;
+pub(crate) use identity::{field, FieldId};
+
 use iced::advanced::{layout, mouse, overlay, renderer, widget, Clipboard, Layout, Shell, Widget};
 use iced::{event, Element, Event, Length, Rectangle, Size, Theme, Vector};
 

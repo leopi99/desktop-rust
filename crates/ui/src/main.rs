@@ -15,7 +15,7 @@ use desktop_core::{
     RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
-use focus_region::region;
+use focus_region::{field, FieldId};
 use iced::futures::SinkExt;
 use iced::widget::{button, column, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
@@ -297,7 +297,7 @@ impl Desktop {
                     apply = apply.on_press(Message::ApplyStash);
                 }
             }
-            controls = controls.push(row![region(text_input("Saved changes description (optional)", &self.stash_message).on_input(Message::StashMessageChanged)), save].spacing(8))
+            controls = controls.push(row![field(FieldId::StashDescription, text_input("Saved changes description (optional)", &self.stash_message).on_input(Message::StashMessageChanged)), save].spacing(8))
                 .push(row![pick_list(snapshot.stashes.as_slice(), self.selected_stash.as_ref(), Message::StashSelected)
                     .placeholder("Select saved changes"), apply].spacing(8))
                 .push(text("New files are saved only if staged first. Restore requires a clean working tree."));
@@ -321,11 +321,13 @@ impl Desktop {
             add = add.on_press(Message::ConfigureRemote(RemoteEdit::Add));
         }
         let mut form = column![row![
-            region(
+            field(
+                FieldId::RemoteName,
                 text_input("Remote name (default: origin)", &self.new_remote_name)
                     .on_input(Message::RemoteNameChanged)
             ),
-            region(
+            field(
+                FieldId::RemoteNewUrl,
                 text_input("URL or local path", &self.new_remote_url)
                     .on_input(Message::RemoteUrlChanged)
             ),
@@ -350,7 +352,8 @@ impl Desktop {
                 .push(text(format!("Editing {}", remote.name.to_string_lossy())))
                 .push(
                     row![
-                        region(
+                        field(
+                            FieldId::RemoteFetchUrl,
                             text_input("Fetch URL", &self.fetch_url)
                                 .on_input(Message::FetchUrlChanged)
                         ),
@@ -360,7 +363,8 @@ impl Desktop {
                 )
                 .push(
                     row![
-                        region(
+                        field(
+                            FieldId::RemotePushUrl,
                             text_input("Push URL", &self.push_url)
                                 .on_input(Message::PushUrlChanged)
                         ),

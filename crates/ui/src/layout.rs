@@ -1,4 +1,8 @@
-use super::{clip::clip, focus_region::region, Desktop, Message, Panel};
+use super::{
+    clip::clip,
+    focus_region::{field, FieldId},
+    Desktop, Message, Panel,
+};
 use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
 use iced::widget::{button, checkbox, column, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length};
@@ -269,7 +273,8 @@ impl Desktop {
                 row![preview, merge].spacing(8),
                 row![preview_rebase, rebase].spacing(8),
                 column![
-                    region(
+                    field(
+                        FieldId::BranchCreate,
                         text_input("New branch name", &self.new_branch)
                             .on_input(Message::BranchNameChanged)
                     ),
@@ -278,7 +283,8 @@ impl Desktop {
                 .spacing(6)
                 .width(Length::Fill),
                 column![
-                    region(
+                    field(
+                        FieldId::BranchRename,
                         text_input("New local branch name", &self.rename_branch)
                             .on_input(Message::RenameBranchNameChanged)
                     ),
@@ -580,7 +586,8 @@ impl Desktop {
                 )
                 .size(14),
                 text("Create a local branch here; keep the current branch checked out").size(14),
-                region(
+                field(
+                    FieldId::HistoryBranchName,
                     text_input("New branch name", &self.new_branch)
                         .on_input(Message::BranchNameChanged)
                 ),
@@ -592,10 +599,12 @@ impl Desktop {
             column![].into()
         } else {
             column![
-                region(
+                field(
+                    FieldId::CommitSummary,
                     text_input("Commit summary", &self.summary).on_input(Message::SummaryChanged)
                 ),
-                region(
+                field(
+                    FieldId::CommitDescription,
                     text_input("Description (optional)", &self.description)
                         .on_input(Message::DescriptionChanged)
                 ),
@@ -611,7 +620,10 @@ impl Desktop {
         let mut sidebar = column![
             text("Desktop Rust").size(24),
             text("Development preview").size(13),
-            region(text_input("Repository path", &self.path).on_input(Message::PathChanged)),
+            field(
+                FieldId::RepositoryPath,
+                text_input("Repository path", &self.path).on_input(Message::PathChanged)
+            ),
             open,
         ]
         .spacing(12)
@@ -727,11 +739,13 @@ impl Desktop {
             Panel::Repository => scrollable(
                 column![
                     text("Create a repository").size(20),
-                    region(
+                    field(
+                        FieldId::InitDestination,
                         text_input("New or existing project folder", &self.init_destination)
                             .on_input(Message::InitDestinationChanged)
                     ),
-                    region(
+                    field(
+                        FieldId::InitBranch,
                         text_input(
                             "Initial branch (blank: Git preference or main)",
                             &self.init_branch
@@ -740,11 +754,13 @@ impl Desktop {
                     ),
                     initialize,
                     text("Clone a repository").size(20),
-                    region(
+                    field(
+                        FieldId::CloneSource,
                         text_input("Clone URL or local source", &self.clone_source)
                             .on_input(Message::CloneSourceChanged)
                     ),
-                    region(
+                    field(
+                        FieldId::CloneDestination,
                         text_input("New destination folder", &self.clone_destination)
                             .on_input(Message::CloneDestinationChanged)
                     ),
