@@ -17,6 +17,14 @@ Security/data-loss fixes can use a small urgent PR. Keep unrelated changes out o
 a batch. PR publication and merging still follow user authorization and the
 repository PR skill; a batch is not permission to merge or waive review.
 
+## Consolidation boundary
+
+Feature growth in `quality/rust-foundations` is frozen for a single review against
+`development`; use [the consolidation note](consolidation.md) for scope, review
+order and known risks. Subsequent features belong to a follow-up milestone after
+consolidation. The [alpha acceptance plan](alpha-acceptance.md) and offline fixture
+helper make UI-01/UI-02 executable; their actual interaction results remain pending.
+
 ## Current batch: quality foundations
 
 | ID | Status | Acceptance |

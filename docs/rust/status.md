@@ -18,7 +18,9 @@ These are coarse engineering planning estimates over broad work areas, with low
 confidence while the full upstream inventory is incomplete. They are not computed
 from test counts, lines of code or equal-sized backlog items. Reassess after
 baseline analysis and real interaction QA; they do not advance parity checkpoints
-or predict a release date. The current branch still needs consolidated review/merge.
+or predict a release date. The current branch still needs consolidated review/merge. Its scope is now frozen
+in [the consolidation note](consolidation.md); [alpha acceptance](alpha-acceptance.md)
+provides disposable manual test fixtures and explicit pending outcomes.
 
 The largest remaining areas are upstream contract inventory/ports, interactive
 UI/accessibility QA, stalled-write cancellation, hunk/history/integration features,
@@ -83,6 +85,18 @@ has no automatic deadline/cancellation for hooks, signing or inherited pipes.
 Status and patch scans each have their own limits; this is not one overall
 operation deadline or a bound on every Git command.
 Default-branch CI activation follows the batch merge.
+
+## Consolidation and alpha acceptance
+
+The accumulated implementation is frozen for one milestone PR against
+`development`; see [review order and boundaries](consolidation.md). The new
+`script/rust-ui-fixture.py` prepares four isolated offline repositories for
+changes/staging, branches/stash, merge conflict and paused rebase. Initial Git
+states, read-only inspection and refusal to overwrite existing roots are verified.
+It leaves fixtures available and never labels preparation as interactive success.
+[Manual acceptance A-01–A-10](alpha-acceptance.md) remains pending; UI-01/UI-02 and
+the alpha completion estimate are unchanged. Review/merge and release readiness
+are separate outcomes.
 
 ## Evidence and confidence
 

@@ -783,6 +783,12 @@ layouts with sample changes, history, remote configuration and a stash. Keyboard
 navigation, focus, IME, HiDPI, accessibility, other renderers/platforms, long-list
 scrolling and complete interactive write/conflict flows remain unverified.
 
+For complete manual flows, use [Linux alpha acceptance](rust/alpha-acceptance.md).
+`script/rust-ui-fixture.py` prepares four persistent offline repositories and can
+launch each with isolated Git configuration. Preparation and read-only inspection
+are verified; actual interactive acceptance remains pending. The current
+[consolidation milestone](rust/consolidation.md) freezes feature growth for review.
+
 ## Stable upstream maintenance
 
 Run `python3 script/upstream/sync.py --output /tmp/desktop-rust-sync-new`.
