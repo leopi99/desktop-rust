@@ -1,6 +1,7 @@
 use super::{
     clip::clip,
     focus_region::{field, FieldId},
+    navigation::{file_button, FileAction},
     Desktop, Message, Panel,
 };
 use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
@@ -21,10 +22,13 @@ impl Desktop {
                     change.worktree,
                     change.path.display()
                 );
-                let mut control = button(text(label));
-                if !self.loading {
-                    control = control.on_press(Message::Select(change.clone()));
-                }
+                let control = file_button(
+                    label,
+                    &snapshot.repository.path,
+                    change,
+                    FileAction::Diff,
+                    !self.loading,
+                );
                 let mut stage = button("Stage");
                 let mut unstage = button("Unstage");
                 if !self.loading && change.can_stage() {
@@ -35,22 +39,27 @@ impl Desktop {
                 }
                 files = files.push(control);
                 if change.is_conflicted() {
-                    let mut review = button("Review conflict");
-                    if !self.loading {
-                        review = review.on_press(Message::ReviewConflict(change.clone()));
-                    }
-                    let mut ours = button("Preview ours");
-                    let mut theirs = button("Preview theirs");
-                    if !self.loading {
-                        ours = ours.on_press(Message::ReviewConflictSide(
-                            change.clone(),
-                            ConflictSide::Ours,
-                        ));
-                        theirs = theirs.on_press(Message::ReviewConflictSide(
-                            change.clone(),
-                            ConflictSide::Theirs,
-                        ));
-                    }
+                    let review = file_button(
+                        "Review conflict",
+                        &snapshot.repository.path,
+                        change,
+                        FileAction::Conflict,
+                        !self.loading,
+                    );
+                    let ours = file_button(
+                        "Preview ours",
+                        &snapshot.repository.path,
+                        change,
+                        FileAction::ConflictSide(ConflictSide::Ours),
+                        !self.loading,
+                    );
+                    let theirs = file_button(
+                        "Preview theirs",
+                        &snapshot.repository.path,
+                        change,
+                        FileAction::ConflictSide(ConflictSide::Theirs),
+                        !self.loading,
+                    );
                     let mut choose_ours = button("Choose ours…");
                     let mut choose_theirs = button("Choose theirs…");
                     if !self.loading {
@@ -73,18 +82,24 @@ impl Desktop {
                 } else {
                     files = files.push(row![stage, unstage].spacing(6));
                     if change.can_review_unstaged_hunks() {
-                        let mut hunks = button("Review unstaged hunks");
-                        if !self.loading {
-                            hunks = hunks.on_press(Message::ReviewHunks(change.clone()));
-                        }
+                        let hunks = file_button(
+                            "Review unstaged hunks",
+                            &snapshot.repository.path,
+                            change,
+                            FileAction::Hunks(crate::HunkSide::Unstaged),
+                            !self.loading,
+                        );
                         files = files.push(hunks);
                     }
                 }
                 if change.can_review_staged_hunks() {
-                    let mut hunks = button("Review staged hunks");
-                    if !self.loading {
-                        hunks = hunks.on_press(Message::ReviewStagedHunks(change.clone()));
-                    }
+                    let hunks = file_button(
+                        "Review staged hunks",
+                        &snapshot.repository.path,
+                        change,
+                        FileAction::Hunks(crate::HunkSide::Staged),
+                        !self.loading,
+                    );
                     files = files.push(hunks);
                 }
             }

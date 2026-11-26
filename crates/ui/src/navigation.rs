@@ -1,8 +1,78 @@
-//! Focusable sidebar navigation; Git action buttons keep their existing handlers.
+//! Focusable panel/file navigation and read-only review controls.
+//! Git writes retain their existing separate handlers.
 use crate::{Message, Panel};
 use iced::advanced::{layout, mouse, overlay, renderer, widget, Clipboard, Layout, Shell, Widget};
 use iced::keyboard::{key, Key};
 use iced::{event, Border, Color, Element, Event, Length, Rectangle, Size, Theme, Vector};
+
+/// Read-only actions offered for an observed changed file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FileAction {
+    Diff,
+    Hunks(crate::HunkSide),
+    Conflict,
+    ConflictSide(crate::ConflictSide),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Target {
+    Panel(Panel),
+    File(std::sync::Arc<FileTarget>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct FileTarget {
+    repository: std::path::PathBuf,
+    change: crate::FileChange,
+    action: FileAction,
+}
+
+impl Target {
+    fn message(&self) -> Message {
+        match self {
+            Self::Panel(panel) => Message::PanelSelected(*panel),
+            Self::File(target) => match target.action {
+                FileAction::Diff => Message::Select(target.change.clone()),
+                FileAction::Hunks(crate::HunkSide::Unstaged) => {
+                    Message::ReviewHunks(target.change.clone())
+                }
+                FileAction::Hunks(crate::HunkSide::Staged) => {
+                    Message::ReviewStagedHunks(target.change.clone())
+                }
+                FileAction::Conflict => Message::ReviewConflict(target.change.clone()),
+                FileAction::ConflictSide(side) => {
+                    Message::ReviewConflictSide(target.change.clone(), side)
+                }
+            },
+        }
+    }
+}
+
+pub(super) fn file_button<'a, R>(
+    label: impl Into<String>,
+    repository: &std::path::Path,
+    change: &crate::FileChange,
+    action: FileAction,
+    enabled: bool,
+) -> Element<'a, Message, Theme, R>
+where
+    R: iced::advanced::text::Renderer + 'a,
+{
+    let target = Target::File(std::sync::Arc::new(FileTarget {
+        repository: repository.to_path_buf(),
+        change: change.clone(),
+        action,
+    }));
+    let mut inner = iced::widget::button(iced::widget::text(label.into()));
+    if enabled {
+        inner = inner.on_press(target.message());
+    }
+    crate::focus_region::region(Element::new(Navigation {
+        inner: inner.into(),
+        target,
+        enabled,
+    }))
+}
 
 pub(super) fn button<'a, R>(
     label: &'a str,
@@ -25,28 +95,28 @@ where
     }
     crate::focus_region::region(Element::new(Navigation {
         inner: inner.into(),
-        panel,
+        target: Target::Panel(panel),
         enabled,
     }))
 }
 
 struct Navigation<'a, R> {
     inner: Element<'a, Message, Theme, R>,
-    panel: Panel,
+    target: Target,
     enabled: bool,
 }
 
 #[derive(Debug)]
 struct State {
-    panel: Panel,
+    target: Target,
     focused: bool,
     armed: Option<key::Named>,
 }
 
 impl State {
-    fn new(panel: Panel) -> Self {
+    fn new(target: Target) -> Self {
         Self {
-            panel,
+            target,
             focused: false,
             armed: None,
         }
@@ -72,15 +142,15 @@ impl<R: iced::advanced::text::Renderer> Widget<Message, Theme, R> for Navigation
         widget::tree::Tag::of::<State>()
     }
     fn state(&self) -> widget::tree::State {
-        widget::tree::State::new(State::new(self.panel))
+        widget::tree::State::new(State::new(self.target.clone()))
     }
     fn children(&self) -> Vec<widget::Tree> {
         vec![widget::Tree::new(self.inner.as_widget())]
     }
     fn diff(&self, tree: &mut widget::Tree) {
         let state = tree.state.downcast_mut::<State>();
-        if state.panel != self.panel || !self.enabled {
-            *state = State::new(self.panel);
+        if state.target != self.target || !self.enabled {
+            *state = State::new(self.target.clone());
         }
         tree.diff_children(std::slice::from_ref(&self.inner));
     }
@@ -130,8 +200,8 @@ impl<R: iced::advanced::text::Renderer> Widget<Message, Theme, R> for Navigation
     ) -> event::Status {
         use widget::operation::Focusable as _;
         let state = tree.state.downcast_mut::<State>();
-        if state.panel != self.panel || !self.enabled {
-            *state = State::new(self.panel);
+        if state.target != self.target || !self.enabled {
+            *state = State::new(self.target.clone());
         }
         match &event {
             Event::Window(iced::window::Event::Unfocused) => state.unfocus(),
@@ -173,7 +243,7 @@ impl<R: iced::advanced::text::Renderer> Widget<Message, Theme, R> for Navigation
                 ..
             }) if state.focused && self.enabled => {
                 if state.armed.take() == Some(*name) && modifiers.is_empty() {
-                    shell.publish(Message::PanelSelected(self.panel));
+                    shell.publish(self.target.message());
                 }
                 return event::Status::Captured;
             }
@@ -615,6 +685,287 @@ mod tests {
         }
         assert_eq!(app.panel, Panel::Changes);
         assert!(app.loading);
+        assert_eq!(app.summary, "keep summary");
+        assert_eq!(app.description, "keep description");
+    }
+
+    fn changed_file() -> crate::FileChange {
+        crate::tests::hunk_app().hunk_review.unwrap().change.clone()
+    }
+
+    fn file_control(
+        repository: &std::path::Path,
+        change: &crate::FileChange,
+        action: FileAction,
+        enabled: bool,
+    ) -> View {
+        file_button("Read file", repository, change, action, enabled)
+    }
+
+    #[test]
+    fn file_and_review_controls_join_traversal_without_git_write_buttons() {
+        let change = changed_file();
+        let root = std::path::Path::new("repository");
+        let view: View = column![
+            text_input("Path", "draft").on_input(Message::PathChanged),
+            button("Changes", Panel::Changes, true, true),
+            file_control(root, &change, FileAction::Diff, true),
+            file_control(
+                root,
+                &change,
+                FileAction::Hunks(crate::HunkSide::Staged),
+                false
+            ),
+            file_control(
+                root,
+                &change,
+                FileAction::Hunks(crate::HunkSide::Unstaged),
+                true
+            ),
+            iced::widget::button("Stage").on_press(Message::Stage(change.clone())),
+        ]
+        .into();
+        let mut tree = widget::Tree::new(view.as_widget());
+        for (direction, expected) in [
+            (FocusDirection::Next, 0),
+            (FocusDirection::Next, 1),
+            (FocusDirection::Next, 2),
+            (FocusDirection::Next, 3),
+            (FocusDirection::Next, 0),
+            (FocusDirection::Previous, 3),
+            (FocusDirection::Previous, 2),
+        ] {
+            let _ = run(&view, &mut tree, focus(direction));
+            let count = run(&view, &mut tree, operation::focusable::count()).unwrap();
+            assert_eq!(count.total, 4);
+            assert_eq!(count.focused, Some(expected));
+        }
+    }
+
+    fn assert_file_message(message: Message, expected: FileAction, change: &crate::FileChange) {
+        let (actual, received) = match message {
+            Message::Select(change) => (FileAction::Diff, change),
+            Message::ReviewHunks(change) => (FileAction::Hunks(crate::HunkSide::Unstaged), change),
+            Message::ReviewStagedHunks(change) => {
+                (FileAction::Hunks(crate::HunkSide::Staged), change)
+            }
+            Message::ReviewConflict(change) => (FileAction::Conflict, change),
+            Message::ReviewConflictSide(change, side) => (FileAction::ConflictSide(side), change),
+            other => panic!("Read-only control emitted {other:?}"),
+        };
+        assert_eq!(actual, expected);
+        assert_eq!(&received, change);
+    }
+
+    #[test]
+    fn every_read_action_emits_once_on_release_and_redraw_preserves_same_target() {
+        let change = changed_file();
+        let root = std::path::Path::new("repository");
+        for action in [
+            FileAction::Diff,
+            FileAction::Hunks(crate::HunkSide::Unstaged),
+            FileAction::Hunks(crate::HunkSide::Staged),
+            FileAction::Conflict,
+            FileAction::ConflictSide(crate::ConflictSide::Ours),
+            FileAction::ConflictSide(crate::ConflictSide::Theirs),
+        ] {
+            for name in [key::Named::Enter, key::Named::Space] {
+                let mut view = file_control(root, &change, action, true);
+                let mut tree = widget::Tree::new(view.as_widget());
+                let _ = run(&view, &mut tree, focus(FocusDirection::Next));
+                for _ in 0..5 {
+                    assert!(send(
+                        &mut view,
+                        &mut tree,
+                        key(name, Modifiers::empty(), true),
+                        mouse::Cursor::Unavailable
+                    )
+                    .1
+                    .is_empty());
+                }
+                view = file_control(root, &change, action, true);
+                tree.diff(view.as_widget());
+                let (_, messages) = send(
+                    &mut view,
+                    &mut tree,
+                    key(name, Modifiers::empty(), false),
+                    mouse::Cursor::Unavailable,
+                );
+                assert_eq!(messages.len(), 1);
+                for message in messages {
+                    assert_file_message(message, action, &change);
+                }
+                assert!(send(
+                    &mut view,
+                    &mut tree,
+                    key(name, Modifiers::empty(), false),
+                    mouse::Cursor::Unavailable
+                )
+                .1
+                .is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn file_identity_changes_cancel_armed_activation_without_redirecting_to_a_replacement() {
+        for replacement in [
+            "repository",
+            "path",
+            "origin",
+            "index",
+            "worktree",
+            "action",
+            "panel",
+            "disabled",
+        ] {
+            let change = changed_file();
+            let root = std::path::Path::new("repository");
+            let mut view = file_control(root, &change, FileAction::Diff, true);
+            let mut tree = widget::Tree::new(view.as_widget());
+            let _ = run(&view, &mut tree, focus(FocusDirection::Next));
+            let _ = send(
+                &mut view,
+                &mut tree,
+                key(key::Named::Enter, Modifiers::empty(), true),
+                mouse::Cursor::Unavailable,
+            );
+            let mut changed = change.clone();
+            let mut repository = root.to_path_buf();
+            let mut action = FileAction::Diff;
+            match replacement {
+                "repository" => repository = "other-repository".into(),
+                "path" => changed.path = "another-file".into(),
+                "origin" => changed.original_path = Some("old-file".into()),
+                "index" => changed.index = 'M',
+                "worktree" => changed.worktree = 'D',
+                "action" => action = FileAction::Hunks(crate::HunkSide::Unstaged),
+                "panel" | "disabled" => {}
+                _ => unreachable!(),
+            }
+            view = if replacement == "panel" {
+                button("Changes", Panel::Changes, true, true)
+            } else {
+                file_control(&repository, &changed, action, replacement != "disabled")
+            };
+            tree.diff(view.as_widget());
+            assert!(!tree.state.downcast_ref::<State>().focused, "{replacement}");
+            assert!(
+                send(
+                    &mut view,
+                    &mut tree,
+                    key(key::Named::Enter, Modifiers::empty(), false),
+                    mouse::Cursor::Unavailable
+                )
+                .1
+                .is_empty(),
+                "{replacement}"
+            );
+        }
+    }
+
+    #[test]
+    fn file_pointer_and_keyboard_keep_native_path_bytes_and_existing_busy_guard() {
+        let change = changed_file();
+        #[cfg(unix)]
+        let change = {
+            let mut change = change;
+            use std::os::unix::ffi::OsStringExt as _;
+            change.path = std::ffi::OsString::from_vec(b"literal-\xff\nfile".to_vec()).into();
+            change.original_path = Some(std::ffi::OsString::from_vec(b"old-\xfe".to_vec()).into());
+            change
+        };
+        let root = std::path::Path::new("repository");
+        for touch in [false, true] {
+            let mut view = file_control(root, &change, FileAction::Diff, true);
+            let mut tree = widget::Tree::new(view.as_widget());
+            let node = layout(&view, &mut tree);
+            let point = Layout::new(&node).bounds().center();
+            let cursor = mouse::Cursor::Available(point);
+            let (press, release) = if touch {
+                (
+                    Event::Touch(iced::touch::Event::FingerPressed {
+                        id: iced::touch::Finger(0),
+                        position: point,
+                    }),
+                    Event::Touch(iced::touch::Event::FingerLifted {
+                        id: iced::touch::Finger(0),
+                        position: point,
+                    }),
+                )
+            } else {
+                (
+                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                    Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                )
+            };
+            assert!(send(&mut view, &mut tree, press, cursor).1.is_empty());
+            let (_, messages) = send(&mut view, &mut tree, release, cursor);
+            assert_eq!(messages.len(), 1);
+            for message in messages {
+                assert_file_message(message, FileAction::Diff, &change);
+            }
+            let _ = send(
+                &mut view,
+                &mut tree,
+                key(key::Named::Enter, Modifiers::empty(), true),
+                mouse::Cursor::Unavailable,
+            );
+            let (_, messages) = send(
+                &mut view,
+                &mut tree,
+                key(key::Named::Enter, Modifiers::empty(), false),
+                mouse::Cursor::Unavailable,
+            );
+            assert_eq!(messages.len(), 1);
+            let mut app = crate::tests::hunk_app();
+            app.loading = true;
+            app.summary = "keep summary".into();
+            app.description = "keep description".into();
+            let reviewed = app.hunk_review.clone();
+            for message in messages {
+                let _ = app.update(message);
+            }
+            assert_eq!(app.hunk_review, reviewed);
+            assert_eq!(app.summary, "keep summary");
+            assert_eq!(app.description, "keep description");
+        }
+    }
+
+    #[test]
+    fn file_activation_uses_existing_review_invalidation_without_clearing_drafts() {
+        let mut app = crate::tests::hunk_app();
+        app.summary = "keep summary".into();
+        app.description = "keep description".into();
+        app.selected_hunks.insert(0);
+        let change = app.hunk_review.as_ref().unwrap().change.clone();
+        let mut view = file_control(
+            std::path::Path::new("repository"),
+            &change,
+            FileAction::Diff,
+            true,
+        );
+        let mut tree = widget::Tree::new(view.as_widget());
+        let _ = run(&view, &mut tree, focus(FocusDirection::Next));
+        let _ = send(
+            &mut view,
+            &mut tree,
+            key(key::Named::Space, Modifiers::empty(), true),
+            mouse::Cursor::Unavailable,
+        );
+        let (_, messages) = send(
+            &mut view,
+            &mut tree,
+            key(key::Named::Space, Modifiers::empty(), false),
+            mouse::Cursor::Unavailable,
+        );
+        assert_eq!(messages.len(), 1);
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert!(app.loading);
+        assert!(app.hunk_review.is_none());
+        assert!(app.selected_hunks.is_empty());
         assert_eq!(app.summary, "keep summary");
         assert_eq!(app.description, "keep description");
     }
