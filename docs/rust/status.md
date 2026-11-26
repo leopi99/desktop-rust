@@ -34,7 +34,7 @@ All eight are merged. Independent prototype features do not imply release parity
 | Area | Implemented and checked | Remaining boundary |
 | --- | --- | --- |
 | Workspace | core/Git/Iced split; Cargo lockfile; Rust/npm CI | Quality policy in the current batch still needs its batch merge. |
-| Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, scoped whole-hunk and individual-line staging/unstaging for modifications, additions and deletions, commits | Broader formats, implicit EOF joining/editing, large-repository virtualization and richer rendering. |
+| Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, scoped whole-hunk and individual-line staging/unstaging for modifications, additions and deletions; staging working edits at staged rename destinations; commits | Coordinated rename/copy operations, broader formats, implicit EOF joining/editing, large-repository virtualization and richer rendering. |
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
@@ -88,7 +88,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 401 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 408 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -323,6 +323,31 @@ passed at 960×640 with unchanged data (`/tmp/desktop-rust-deletion-smoke-960`).
 No root UI variant was added; selection invalidation and draft preservation reuse
 the existing protocol. G-02 and full baseline analysis remain open; no upstream
 analysis/parity checkpoint advances.
+Working edits at staged rename destinations ([8dd2e70301](https://github.com/leopi99/desktop-rust/commit/8dd2e70301f2d6c172808593e25578f254d65e46), 2026-11-26) passed
+408 Rust tests (including 107 existing UI state/capture-option tests), 32 upstream
+and 10 compiler/policy tests, plus formatter, Clippy, warning-free rustdoc and npm
+lint. Seven regressions cover single/multiple hunks and independent added/deleted
+rows, prior staged changes, commits/other index paths, recreated working sources,
+missing destinations, native/quoted paths, CRLF/EOF and executable mode, stale
+inputs/policy, unsupported content, forged origins and index lock failure/retry.
+The existing pure-rename regression (`ef88102f1f`) now explicitly checks index-R
+and unchanged working status before refusing an unstaged hunk review.
+
+Only observed index-R / working-M-or-D paths enter this extension. The existing
+index-to-working diff and cached patch target the destination entry. The source
+entry remains absent, and any independent working file recreated at its old name
+stays intact. Full destination deletion removes its index entry as well, leaving
+the original staged deletion. Staged-side rename review, partial unstaging of the
+move/content, copies and working-tree renames remain outside this scope. Existing
+conversion/mode, byte/row, freshness, selection invalidation and draft rules apply.
+
+Modified and missing rename destinations were captured and visually inspected at
+960×640 and 1200×800 with unchanged fixture signatures and the original path still
+absent (`/tmp/desktop-rust-staged-rename-ui-0a6jonyd`). The eight-panel/three-failure
+minimum-size smoke passed with unchanged data
+(`/tmp/desktop-rust-staged-rename-smoke-960`). No root UI variant was added. These
+captures do not close interaction/accessibility or native platform QA. G-02 and
+the full upstream baseline remain open; no checkpoint advances.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.

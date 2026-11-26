@@ -462,6 +462,34 @@ staged additions. Empty deletions still use full-file controls. Broader formats,
 conversion contracts, original fixture/caller audit and interactive/platform QA
 remain open. No upstream analysis/parity checkpoint advances.
 
+## Working edits at an already staged rename destination
+
+Focused pinned [working-directory diff excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/diff.ts)
+compare renamed paths against the index at the destination. The source comments
+explicitly distinguish this from a HEAD/source comparison. Pinned
+[patch formatter excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/patch-formatter.ts)
+use the destination for both patch paths when status is renamed, to target content
+alongside an existing rename. These excerpts do not establish complete rename,
+selection, unstaging, original fixture or platform contracts.
+
+Rust [8dd2e70301](https://github.com/leopi99/desktop-rust/commit/8dd2e70301f2d6c172808593e25578f254d65e46) admits observed index-R / working-M-or-D paths to the existing
+complete unstaged review. Deterministic no-renames diff and cached check/apply still
+target only the destination; the source entry is not restored or rewritten. A
+separately recreated working source stays untouched. Missing destinations use the
+same bounded index source and partial deletion semantics. Staging their complete
+deletion removes the destination entry as well, leaving the original staged deletion.
+Existing path quoting, complete-patch/line bounds, mode/conversion rules and
+freshness binding (including original path/status) remain unchanged.
+
+Seven regressions cover single/multiple hunks, independent added/deleted row
+selection, prior staged edits, commits/other index paths, recreated working sources,
+missing destinations, native names/CRLF/EOF/modes, stale paths/index/HEAD/policy,
+unsupported content, forged origins, wrong-side authority and index lock retry.
+Pure moves have no unstaged text hunk; copies, working renames and partial staged
+rename review/unstaging remain open. Git status/configuration/similarity determines
+whether a move is reported; Rust does not infer one from separate additions and
+deletions. The full baseline and G-02 remain open; no checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -471,7 +499,7 @@ Feature identifiers match `upstream/features.json`.
 | --- | --- | --- |
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
-| stage-commit | Partial complete-hunk apply/formatter/test inspection | Broader formats/implicit EOF editing, full index/commit selection contracts and original tests. |
+| stage-commit | Partial complete-hunk apply/formatter/test inspection | Coordinated rename/copy operations, broader formats/implicit EOF editing, full index/commit selection contracts and original tests. |
 | repository-read, diff, commit-history | Pending full inventory | Status/diff/history contracts, parsing, limits and original tests. |
 | branches, stash | Partial rename and commit-based creation slices; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |

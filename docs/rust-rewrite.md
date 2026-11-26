@@ -88,9 +88,10 @@ remain intact. The staged/unstaged label and action are bound to the review:
 a forward-stage review cannot authorize unstaging, and the reverse is also refused.
 Unstage at file level continues to reset the whole file's index entry.
 
-This scope accepts unrenamed regular UTF-8 text modifications with unchanged
-Git file mode, regular additions/deletions and no content-conversion policy.
-Renamed files, symlinks, submodules, binary/non-UTF-8 data and
+This scope accepts regular UTF-8 text modifications with unchanged Git file mode,
+regular additions/deletions, working edits at staged rename destinations and no
+content-conversion policy. Coordinated rename changes, symlinks, submodules,
+binary/non-UTF-8 data and
 filters/text/EOL/ident/encoding conversion settings require full-file staging or an
 external Git tool. CRLF bytes without Git conversion and no-newline markers are
 preserved. Staged mode changes to existing files remain outside this scope.
@@ -118,6 +119,22 @@ file remains absent. This includes additions staged before being removed from
 disk. None of these actions recreates a working file. A recreated working path
 invalidates a deletion review. Empty deleted files have no text hunk and use
 full-file controls. Binary, special and converted sources remain unsupported.
+
+After Git reports an already staged rename, Review unstaged hunks can select
+working edits at its destination. The comparison is index-to-working at the new
+path; the cached patch updates only that destination index entry. The original
+path stays removed from the index, and an independently recreated working file at
+the old name is preserved. Prior staged edits and the destination executable mode
+stay in place. If the destination is missing, selecting deleted rows keeps the
+remaining index text under the new name. Staging that entire deletion removes
+the destination entry too, leaving the original path's staged deletion.
+
+A pure rename has no unstaged text hunk. Staged-side hunk review of a rename,
+partial unstaging of its content/move, working-tree renames and copies remain
+outside this scope; file-level Unstage still resets both observed rename paths.
+The app uses Git's observed status and does not infer a move from separate
+addition/deletion records. Detection/configuration or similarity changes can
+invalidate the review and require a fresh selection.
 
 The complete patch is limited to 512 KiB and 128 hunks; working-file contents to
 8 MiB, also for source blobs read when working files are absent. An oversized or
@@ -177,8 +194,10 @@ implicit separator and is refused. Selecting their complete replacement preserve
 its exact bytes. Newline-only changes and transitions to/from empty contents are
 supported. CRLF without Git conversion remains supported. Larger reviews retain
 whole-hunk controls up to their original limits.
-New/deleted/renamed/special/binary files, conversion policies and full interactive
-or platform parity remain outside this scope.
+Line selection applies to the supported modifications, additions, deletions and
+staged rename destinations described above. Coordinated rename operations,
+special/binary formats, conversion policies and full interactive/platform parity
+remain outside this scope.
 
 ## Create a branch from history
 
