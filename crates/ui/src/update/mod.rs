@@ -16,6 +16,9 @@ use iced::Task;
 impl Desktop {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::MoveFocus(direction) => {
+                self.update_application(application::Event::MoveFocus(direction))
+            }
             Message::PanelSelected(panel) => {
                 self.update_application(application::Event::PanelSelected(panel))
             }

@@ -4,6 +4,7 @@ use iced::Task;
 
 #[derive(Debug)]
 pub(super) enum Event {
+    MoveFocus(crate::keyboard::FocusDirection),
     PanelSelected(Panel),
     CheckGitRuntime,
     GitRuntimeLoaded(Result<GitRuntime, String>),
@@ -14,6 +15,9 @@ pub(super) enum Event {
 impl Desktop {
     pub(super) fn update_application(&mut self, event: Event) -> Task<Message> {
         match event {
+            Event::MoveFocus(direction) => {
+                return iced::advanced::widget::operate(crate::keyboard::focus(direction))
+            }
             Event::PanelSelected(panel) if !self.loading => {
                 self.delete_branch_pending = None;
                 self.panel = panel;

@@ -1,6 +1,7 @@
 //! Iced entry point and guarded UI state transitions for the Rust preview.
 mod capture;
 mod clip;
+mod keyboard;
 mod layout;
 mod update;
 
@@ -84,6 +85,7 @@ struct Desktop {
 
 #[derive(Debug, Clone)]
 enum Message {
+    MoveFocus(keyboard::FocusDirection),
     PanelSelected(Panel),
     CheckGitRuntime,
     GitRuntimeLoaded(Result<GitRuntime, String>),
@@ -386,14 +388,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             min_size: Some(iced::Size::new(960.0, 640.0)),
             ..Default::default()
         })
-        .subscription(|app: &Desktop| {
-            if app.capture.is_some() && !app.loading && !app.checking_git && app.capture_frames < 4
-            {
-                iced::window::frames().map(|_| Message::CaptureFrame)
-            } else {
-                iced::Subscription::none()
-            }
-        })
+        .subscription(keyboard::subscription)
         .run_with(|| (app, startup))?;
     if capturing && !success.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("Window closed before a successful capture".into());
@@ -432,6 +427,46 @@ mod tests {
                 },
             }),
             ..Desktop::default()
+        }
+    }
+
+    #[test]
+    fn moving_focus_preserves_drafts_hunk_authority_and_busy_operation_state() {
+        for busy in [false, true] {
+            let mut app = hunk_app();
+            app.loading = busy;
+            app.summary = "keep summary".into();
+            app.description = "keep body".into();
+            app.new_branch = "keep branch draft".into();
+            app.selected_hunks.insert(0);
+            let line = HunkLine { hunk: 0, line: 1 };
+            app.selected_lines.insert(line);
+            let review = app.hunk_review.clone().unwrap();
+            let basis = app.snapshot.as_ref().unwrap().commit_basis.clone();
+            for direction in [
+                keyboard::FocusDirection::Next,
+                keyboard::FocusDirection::Previous,
+            ] {
+                let _ = app.update(Message::MoveFocus(direction));
+                assert_eq!(app.loading, busy);
+                assert_eq!(app.summary, "keep summary");
+                assert_eq!(app.description, "keep body");
+                assert_eq!(app.new_branch, "keep branch draft");
+                assert_eq!(app.panel, Panel::Changes);
+                assert!(std::sync::Arc::ptr_eq(
+                    &review,
+                    app.hunk_review.as_ref().unwrap()
+                ));
+                assert_eq!(
+                    app.selected_hunks.iter().copied().collect::<Vec<_>>(),
+                    vec![0]
+                );
+                assert_eq!(
+                    app.selected_lines.iter().copied().collect::<Vec<_>>(),
+                    vec![line]
+                );
+                assert_eq!(app.snapshot.as_ref().unwrap().commit_basis, basis);
+            }
         }
     }
 
