@@ -128,15 +128,13 @@ impl Desktop {
                 if let Some(review) = &self.hunk_review {
                     if review.line_selection_available() {
                         if let Some(hunk) = review.hunks.get(line.hunk) {
-                            let no_marker =
-                                !hunk.lines().any(|row| row.starts_with("\\ No newline"));
                             let changed =
                                 hunk.split_inclusive('\n')
                                     .nth(line.line)
                                     .is_some_and(|row| {
                                         matches!(row.as_bytes().first(), Some(b'+' | b'-'))
                                     });
-                            if no_marker && changed {
+                            if changed {
                                 let full = self.selected_hunks.contains(&line.hunk);
                                 if full && !selected {
                                     self.selected_hunks.remove(&line.hunk);

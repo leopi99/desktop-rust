@@ -270,12 +270,13 @@ fn apply_hunks(review: &HunkReview, indices: &[usize], side: HunkSide) -> io::Re
 
 /// Stage selected added/deleted rows from a complete unstaged review.
 /// Coordinates include the hunk header as row zero. Context and no-newline marker
-/// rows cannot be selected. Partial selection of no-newline hunks is refused.
+/// rows cannot be selected. Selections that would place rows after a missing
+/// final newline in either side of the reconstructed patch are refused.
 ///
 /// # Errors
 ///
 /// Returns an error for invalid/duplicate/empty selection, line-control limits,
-/// unsupported EOF selection, stale/wrong-side review, patch or index failure.
+/// ambiguous EOF selection, stale/wrong-side review, patch or index failure.
 pub fn stage_lines(review: &HunkReview, selection: &[HunkLine]) -> io::Result<String> {
     let patch = lines::patch(review, selection)?;
     apply_patch(
@@ -289,12 +290,12 @@ pub fn stage_lines(review: &HunkReview, selection: &[HunkLine]) -> io::Result<St
 
 /// Unstage selected rows from a complete staged review, without writing working files.
 /// Unselected additions remain context; unselected deletions are omitted from the
-/// reverse patch. The same limits and conservative EOF rules as stage_lines apply.
+/// reverse patch. The same limits and EOF stream validation as stage_lines apply.
 ///
 /// # Errors
 ///
 /// Returns an error for invalid/duplicate/empty selection, line-control limits,
-/// unsupported EOF selection, stale/wrong-side review, patch or index failure.
+/// ambiguous EOF selection, stale/wrong-side review, patch or index failure.
 pub fn unstage_lines(review: &HunkReview, selection: &[HunkLine]) -> io::Result<String> {
     let patch = lines::patch(review, selection)?;
     apply_patch(review, HunkSide::Staged, &patch, selection.len(), "line(s)")

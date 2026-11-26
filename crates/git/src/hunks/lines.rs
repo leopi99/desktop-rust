@@ -54,25 +54,23 @@ pub(super) fn patch(review: &HunkReview, selection: &[HunkLine]) -> io::Result<S
         let hunk = &review.hunks[hunk_index];
         super::validate_hunk(hunk)?;
         let rows: Vec<_> = hunk.split_inclusive('\n').collect();
-        if rows.iter().any(|row| row.starts_with("\\ No newline")) {
-            let changed = rows
-                .iter()
-                .filter(|row| matches!(row.as_bytes().first(), Some(b'+' | b'-')))
-                .count();
-            if selected.len() != changed {
-                return Err(invalid("Select every changed line of a hunk containing a no-newline marker, or use the whole hunk"));
-            }
-        }
         let fields: Vec<_> = rows[0].split(' ').collect();
         let (old_start, _) = coordinate(fields[1])?;
         let (new_start, _) = coordinate(fields[2])?;
         let mut body = String::new();
         let (mut old_count, mut new_count) = (0usize, 0usize);
-        let mut included_previous = false;
+        let mut previous_output = None;
+        let (mut old_eof, mut new_eof) = (false, false);
         for (line_index, line) in rows.iter().enumerate().skip(1) {
             let prefix = line.as_bytes()[0];
             if prefix == b'\\' {
-                if included_previous {
+                if let Some(output) = previous_output {
+                    if output != '+' {
+                        old_eof = true;
+                    }
+                    if output != '-' {
+                        new_eof = true;
+                    }
                     body.push_str(line);
                 }
                 continue;
@@ -85,8 +83,11 @@ pub(super) fn patch(review: &HunkReview, selection: &[HunkLine]) -> io::Result<S
                 (HunkSide::Unstaged, b'+', false) | (HunkSide::Staged, b'-', false) => None,
                 _ => return Err(invalid("Invalid reviewed patch row")),
             };
-            included_previous = output.is_some();
+            previous_output = output;
             if let Some(output) = output {
+                if (output != '+' && old_eof) || (output != '-' && new_eof) {
+                    return Err(invalid("Selection would append lines after a missing final newline; select the adjoining EOF changes together or use the whole hunk"));
+                }
                 body.push(output);
                 body.push_str(&line[1..]);
                 if output != '+' {

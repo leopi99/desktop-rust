@@ -1693,7 +1693,11 @@ mod tests {
             review.hunks = vec![body];
             let _ = app.update(Message::HunksReviewed(Ok(review)));
             let _ = app.update(Message::ToggleHunkLine(HunkLine { hunk: 0, line: 1 }, true));
-            assert!(app.selected_lines.is_empty());
+            let expected =
+                usize::from(app.hunk_review.as_ref().unwrap().line_selection_available());
+            assert_eq!(app.selected_lines.len(), expected);
+            let _ = app.update(Message::ToggleHunkLine(HunkLine { hunk: 0, line: 2 }, true));
+            assert_eq!(app.selected_lines.len(), expected); // A no-newline marker is not a changed row.
             let _ = app.update(Message::ToggleHunk(0, true));
             assert_eq!(app.selected_hunks.len(), 1);
         }

@@ -442,7 +442,10 @@ impl Desktop {
                     selection =
                         selection.on_toggle(move |selected| Message::ToggleHunk(index, selected));
                 }
-                if line_controls && !hunk.lines().any(|row| row.starts_with("\\ No newline")) {
+                if line_controls {
+                    if hunk.lines().any(|row| row.starts_with("\\ No newline")) {
+                        contents=contents.push(text("Missing final newline: adjoining EOF changes may need to be selected together.").size(14));
+                    }
                     for (line, row) in hunk.split_inclusive('\n').enumerate() {
                         if matches!(row.as_bytes().first(), Some(b'+' | b'-')) {
                             let coordinate = crate::HunkLine { hunk: index, line };
@@ -465,11 +468,6 @@ impl Desktop {
                     }
                 } else {
                     contents = contents.push(text(hunk).font(iced::Font::MONOSPACE));
-                    if line_controls {
-                        contents = contents.push(
-                            text("Use the whole hunk when the final newline is missing.").size(14),
-                        );
-                    }
                 }
                 contents = contents.push(selection).push(stage);
             }
