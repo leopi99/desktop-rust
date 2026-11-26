@@ -61,3 +61,6 @@ section in the body. It stays draft until the human author assesses this batch's
 changes/evidence; required additional human review is still necessary before
 approval. Open acceptance tasks remain visible rather than being marked done by
 merging an engineering milestone.
+
+[Persisted local verification evidence](evidence/quality-foundations/README.md) binds
+the tested revision to command outcomes, capture integrity and selected images.

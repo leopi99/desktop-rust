@@ -96,7 +96,8 @@ states, read-only inspection and refusal to overwrite existing roots are verifie
 It leaves fixtures available and never labels preparation as interactive success.
 [Manual acceptance A-01–A-10](alpha-acceptance.md) remains pending; UI-01/UI-02 and
 the alpha completion estimate are unchanged. Review/merge and release readiness
-are separate outcomes.
+are separate outcomes. [Persisted evidence](evidence/quality-foundations/README.md)
+records the frozen revision, fresh local gates and four curated own-window images.
 
 ## Evidence and confidence
 

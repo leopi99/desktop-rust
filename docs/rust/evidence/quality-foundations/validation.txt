@@ -1,0 +1,35 @@
+Curated local verification summary (not a full terminal recording)
+Tested implementation/tooling revision: 2ea9a7665d400e0b5e39c70e0c8ac40710ebbacf
+Platform: Linux; pinned Rust 1.100.0; software-rendered captures.
+
+$ python3 script/check_rust.py --offline
+Workspace lint/package policy: 3 members, passed
+Compiler/policy tests: 10 passed
+Rust workspace tests: 408 passed (including 107 UI tests)
+rustfmt: passed
+Clippy --workspace --all-targets --all-features -- -D warnings: passed
+rustdoc --workspace --all-features --no-deps with -D warnings: passed
+
+$ python3 script/upstream/registry.py
+Upstream ledger and checkpoints are valid
+$ python3 -m unittest discover -s script/upstream -v
+Ran 32 tests; OK
+
+$ npm run lint:fix
+Exit status 0
+$ npm run lint
+Exit status 0
+
+$ cargo build --locked --offline -p desktop-rust
+Exit status 0
+$ python3 script/rust-ui-smoke.py --output FRESH_960 --size 960x640
+Captured 8 panels plus 3 diagnostic failures; fixture unchanged
+$ python3 script/rust-ui-smoke.py --output FRESH_1200 --size 1200x800
+Captured 8 panels plus 3 diagnostic failures; fixture unchanged
+
+Additional line-selection/conflict-choice captures at both sizes: fixture unchanged
+Four curated 960x640 images: visually inspected
+Fixture preparation/inspection and root/configuration guards: passed
+Separate Git abort fixture sanity checks: passed
+Actual interactive acceptance A-01 through A-10: NOT RUN
+Hosted CI: no successful result claimed (quota exhausted per owner)

@@ -773,8 +773,9 @@ python3 script/rust-ui-smoke.py --output /tmp/fresh-ui-960 --size 960x640
 Each output directory must be new. The script requires a graphical session,
 uses the software renderer unless `ICED_BACKEND` is set, creates and removes a
 temporary repository, and checks that its working files, config, status, refs and
-index remain unchanged. PNGs and `report.json` are local review artifacts, not
-committed baselines. Compare the images manually: capture success alone does not
+index remain unchanged. Raw PNGs and `report.json` are local review artifacts.
+A small curated set may be committed as milestone review evidence, never as
+automated pixel baselines. Compare the images manually: capture success alone does not
 establish visual correctness. Automated CI currently runs state tests, not captures.
 
 On 2026-11-24, all six basic panels were captured and visually inspected on Linux
