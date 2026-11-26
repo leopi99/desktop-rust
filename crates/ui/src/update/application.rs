@@ -49,6 +49,9 @@ impl Desktop {
             }
             Event::CaptureFrame => {
                 self.capture_frames += 1;
+                if self.capture_navigation_focus && self.capture_frames <= 2 {
+                    return self.update(Message::MoveFocus(crate::keyboard::FocusDirection::Next));
+                }
                 if self.capture_frames == 4 {
                     return iced::window::get_latest()
                         .and_then(iced::window::screenshot)

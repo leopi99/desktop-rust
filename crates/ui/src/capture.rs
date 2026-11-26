@@ -13,6 +13,7 @@ pub(super) struct Start {
     pub(super) capture: Option<PathBuf>,
     panel: Panel,
     review_delete: bool,
+    review_navigation: bool,
     review_hunks: Option<HunkSide>,
     select_hunks: bool,
     select_lines: bool,
@@ -31,6 +32,7 @@ impl Start {
             capture: None,
             panel: Panel::Changes,
             review_delete: false,
+            review_navigation: false,
             review_hunks: None,
             select_hunks: false,
             select_lines: false,
@@ -40,7 +42,7 @@ impl Start {
         let mut args = args.into_iter();
         while let Some(flag) = args.next() {
             if flag == "--help" {
-                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|hunk-review|hunk-unstage-review|line-selection-review|line-unstage-selection-review|hunk-selection-review|hunk-unstage-selection-review|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
+                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|keyboard-nav-review|hunk-review|hunk-unstage-review|line-selection-review|line-unstage-selection-review|hunk-selection-review|hunk-unstage-selection-review|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
                 return Ok(None);
             }
             if !["--repository", "--panel", "--size", "--capture"]
@@ -55,6 +57,7 @@ impl Start {
                 Some("--capture") => start.capture = Some(value.into()),
                 Some("--panel") => {
                     start.review_delete = value == "branch-delete-review";
+                    start.review_navigation = value == "keyboard-nav-review";
                     start.select_lines = matches!(
                         value.to_str(),
                         Some("line-selection-review" | "line-unstage-selection-review")
@@ -82,6 +85,7 @@ impl Start {
                     start.panel = match value.to_str() {
                         Some(
                             "changes"
+                            | "keyboard-nav-review"
                             | "hunk-review"
                             | "line-selection-review"
                             | "line-unstage-selection-review"
@@ -115,7 +119,10 @@ impl Start {
                 _ => unreachable!(),
             }
         }
-        if (start.review_delete || start.review_hunks.is_some() || start.review_side.is_some())
+        if (start.review_delete
+            || start.review_navigation
+            || start.review_hunks.is_some()
+            || start.review_side.is_some())
             && (start.capture.is_none() || start.repository.is_none())
         {
             return Err("Review captures require --repository and --capture".into());
@@ -129,6 +136,7 @@ impl Start {
     pub(super) fn initialize(self) -> Result<Desktop, Error> {
         let mut app = Desktop {
             capture: self.capture,
+            capture_navigation_focus: self.review_navigation,
             ..Desktop::default()
         };
         // Launch-time inspection is read-only; no transfer or Git write is triggered.
@@ -305,6 +313,45 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn navigation_focus_capture_requires_explicit_read_only_context() {
+        for args in [
+            vec!["--panel", "keyboard-nav-review"],
+            vec![
+                "--panel",
+                "keyboard-nav-review",
+                "--repository",
+                "/tmp/repo",
+            ],
+            vec![
+                "--panel",
+                "keyboard-nav-review",
+                "--capture",
+                "/tmp/new-focus.png",
+            ],
+        ] {
+            assert!(parse(&args).is_err());
+        }
+        let start = parse(&[
+            "--panel",
+            "keyboard-nav-review",
+            "--repository",
+            "/tmp/repo",
+            "--capture",
+            "/tmp/new-focus.png",
+        ])
+        .unwrap()
+        .unwrap();
+        assert!(start.review_navigation);
+        assert_eq!(start.panel, Panel::Changes);
+        assert!(start.review_hunks.is_none());
+        assert!(start.review_side.is_none());
+        let replaced = parse(&["--panel", "keyboard-nav-review", "--panel", "history"])
+            .unwrap()
+            .unwrap();
+        assert!(!replaced.review_navigation);
     }
 
     #[test]

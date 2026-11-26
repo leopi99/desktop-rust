@@ -645,15 +645,12 @@ impl Desktop {
             ("Git", Panel::Git),
         ] {
             let active = self.panel == panel;
-            let mut nav = button(label).width(Length::Fill).style(if active {
-                button::primary
-            } else {
-                button::secondary
-            });
-            if !self.loading {
-                nav = nav.on_press(Message::PanelSelected(panel));
-            }
-            sidebar = sidebar.push(nav);
+            sidebar = sidebar.push(crate::navigation::button(
+                label,
+                panel,
+                active,
+                !self.loading,
+            ));
         }
         let title = match self.panel {
             Panel::Changes => "Changes",

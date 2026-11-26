@@ -1,4 +1,4 @@
-//! Unhandled Tab navigation between text inputs and the existing capture clock.
+//! Unhandled Tab traversal of current focusable controls and the capture clock.
 use crate::{Desktop, Message};
 use iced::advanced::widget::{operation, Id, Operation};
 use iced::keyboard::{key, Key, Modifiers};

@@ -3,6 +3,7 @@ mod capture;
 mod clip;
 mod keyboard;
 mod layout;
+mod navigation;
 mod update;
 
 use desktop_core::{
@@ -37,6 +38,7 @@ struct Desktop {
     panel: Panel,
     capture: Option<std::path::PathBuf>,
     capture_frames: u8,
+    capture_navigation_focus: bool,
     capture_success: std::sync::Arc<std::sync::atomic::AtomicBool>,
     path: String,
     snapshot: Option<RepositorySnapshot>,
