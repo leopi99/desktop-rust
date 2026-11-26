@@ -1,5 +1,5 @@
 //! Developer launch options and captures of the application's own window.
-use super::{ConflictSide, Desktop, Message, Panel};
+use super::{ConflictSide, Desktop, HunkSide, Message, Panel};
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
@@ -13,7 +13,7 @@ pub(super) struct Start {
     pub(super) capture: Option<PathBuf>,
     panel: Panel,
     review_delete: bool,
-    review_hunks: bool,
+    review_hunks: Option<HunkSide>,
     review_side: Option<ConflictSide>,
     pub(super) size: iced::Size,
 }
@@ -29,14 +29,14 @@ impl Start {
             capture: None,
             panel: Panel::Changes,
             review_delete: false,
-            review_hunks: false,
+            review_hunks: None,
             review_side: None,
             size: iced::Size::new(1200.0, 800.0),
         };
         let mut args = args.into_iter();
         while let Some(flag) = args.next() {
             if flag == "--help" {
-                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|hunk-review|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
+                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|hunk-review|hunk-unstage-review|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
                 return Ok(None);
             }
             if !["--repository", "--panel", "--size", "--capture"]
@@ -51,7 +51,11 @@ impl Start {
                 Some("--capture") => start.capture = Some(value.into()),
                 Some("--panel") => {
                     start.review_delete = value == "branch-delete-review";
-                    start.review_hunks = value == "hunk-review";
+                    start.review_hunks = match value.to_str() {
+                        Some("hunk-review") => Some(HunkSide::Unstaged),
+                        Some("hunk-unstage-review") => Some(HunkSide::Staged),
+                        _ => None,
+                    };
                     start.review_side = match value.to_str() {
                         Some("conflict-ours-review") => Some(ConflictSide::Ours),
                         Some("conflict-theirs-review") => Some(ConflictSide::Theirs),
@@ -61,6 +65,7 @@ impl Start {
                         Some(
                             "changes"
                             | "hunk-review"
+                            | "hunk-unstage-review"
                             | "conflict-ours-review"
                             | "conflict-theirs-review",
                         ) => Panel::Changes,
@@ -88,7 +93,7 @@ impl Start {
                 _ => unreachable!(),
             }
         }
-        if (start.review_delete || start.review_hunks || start.review_side.is_some())
+        if (start.review_delete || start.review_hunks.is_some() || start.review_side.is_some())
             && (start.capture.is_none() || start.repository.is_none())
         {
             return Err("Review captures require --repository and --capture".into());
@@ -128,7 +133,7 @@ impl Start {
                 app.select_remote(remote);
             }
         }
-        if self.review_hunks {
+        if let Some(side) = self.review_hunks {
             let snapshot = app
                 .snapshot
                 .as_ref()
@@ -137,13 +142,24 @@ impl Start {
                 .changes
                 .iter()
                 .find(|change| {
-                    change.worktree == 'M'
-                        && matches!(change.index, ' ' | 'M')
-                        && change.original_path.is_none()
+                    change.original_path.is_none()
+                        && match side {
+                            HunkSide::Unstaged => {
+                                change.worktree == 'M' && matches!(change.index, ' ' | 'M')
+                            }
+                            HunkSide::Staged => {
+                                change.index == 'M' && matches!(change.worktree, ' ' | 'M')
+                            }
+                        }
                 })
                 .ok_or("Hunk capture needs an existing tracked text modification")?;
-            let review = desktop_git::review_hunks(&snapshot.repository.path, change)?;
-            // Capture prepares only; it never sends StageHunk.
+            let review = match side {
+                HunkSide::Unstaged => desktop_git::review_hunks(&snapshot.repository.path, change)?,
+                HunkSide::Staged => {
+                    desktop_git::review_staged_hunks(&snapshot.repository.path, change)?
+                }
+            };
+            // Capture prepares only; it never sends StageHunk or UnstageHunk.
             let _ = app.update(Message::HunksReviewed(Ok(review)));
         }
         if let Some(side) = self.review_side {
@@ -289,7 +305,40 @@ mod tests {
         ])
         .unwrap()
         .unwrap();
-        assert!(start.review_hunks);
+        assert_eq!(start.review_hunks, Some(HunkSide::Unstaged));
+        assert_eq!(start.panel, Panel::Changes);
+    }
+
+    #[test]
+    fn staged_hunk_capture_requires_explicit_repository_and_destination() {
+        for args in [
+            vec!["--panel", "hunk-unstage-review"],
+            vec![
+                "--panel",
+                "hunk-unstage-review",
+                "--repository",
+                "/tmp/repo",
+            ],
+            vec![
+                "--panel",
+                "hunk-unstage-review",
+                "--capture",
+                "/tmp/new-staged.png",
+            ],
+        ] {
+            assert!(parse(&args).is_err());
+        }
+        let start = parse(&[
+            "--panel",
+            "hunk-unstage-review",
+            "--repository",
+            "/tmp/repo",
+            "--capture",
+            "/tmp/new-staged.png",
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(start.review_hunks, Some(HunkSide::Staged));
         assert_eq!(start.panel, Panel::Changes);
     }
 

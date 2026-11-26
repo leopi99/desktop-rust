@@ -79,6 +79,17 @@ impl Desktop {
                         files = files.push(hunks);
                     }
                 }
+                if !change.is_conflicted()
+                    && change.index == 'M'
+                    && matches!(change.worktree, ' ' | 'M')
+                    && change.original_path.is_none()
+                {
+                    let mut hunks = button("Review staged hunks");
+                    if !self.loading {
+                        hunks = hunks.on_press(Message::ReviewStagedHunks(change.clone()));
+                    }
+                    files = files.push(hunks);
+                }
             }
         }
         if let Some(review) = &self.conflict_review {
@@ -400,15 +411,19 @@ impl Desktop {
                 close = close.on_press(Message::CancelHunks);
             }
             let mut contents = column![
-                text(format!("Unstaged hunks: {}", review.change.path.display())),
-                text("Stage one block; keep the working file and other blocks unchanged."),
+                text(format!("{:?} hunks: {}", review.side, review.change.path.display())),
+                text("Change only this index block; keep the working file and other blocks unchanged."),
                 close
             ]
             .spacing(8);
             for (index, hunk) in review.hunks.iter().enumerate() {
-                let mut stage = button(text(format!("Stage hunk {}", index + 1)));
+                let (label, message) = match review.side {
+                    crate::HunkSide::Unstaged => ("Stage", Message::StageHunk(index)),
+                    crate::HunkSide::Staged => ("Unstage", Message::UnstageHunk(index)),
+                };
+                let mut stage = button(text(format!("{label} hunk {}", index + 1)));
                 if !self.loading {
-                    stage = stage.on_press(Message::StageHunk(index));
+                    stage = stage.on_press(message);
                 }
                 contents = contents
                     .push(text(hunk).font(iced::Font::MONOSPACE))

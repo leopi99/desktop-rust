@@ -328,3 +328,185 @@ fn choosing_a_later_hunk_uses_index_coordinates_despite_earlier_insertions() {
     desktop_git::stage_hunk(&fresh, 0).unwrap();
     assert_eq!(f.index(), work.as_bytes());
 }
+
+#[test]
+fn either_staged_hunk_can_be_removed_then_the_remaining_block_committed() {
+    for (index, kept) in [(0, 35), (1, 10)] {
+        let f = Fixture::new("file", &contents(&[]), &contents(&[10, 35]));
+        f.git(&["add", "--all"]);
+        let before = f.basis();
+        let review = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+        assert_eq!(review.side, desktop_core::HunkSide::Staged);
+        assert_eq!(review.hunks.len(), 2);
+        assert_eq!(f.basis(), before);
+        desktop_git::unstage_hunk(&review, index).unwrap();
+        assert_eq!(f.index(), contents(&[kept]));
+        assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[10, 35]));
+        let staged = f.basis();
+        assert!(desktop_git::unstage_hunk(&review, index).is_err());
+        assert_eq!(f.basis(), staged);
+        desktop_git::commit(&f.root, "Commit remaining staged hunk", &staged).unwrap();
+        assert_eq!(f.git(&["show", "HEAD:file"]), contents(&[kept]));
+        assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[10, 35]));
+    }
+}
+
+#[test]
+fn unstaging_preserves_divergent_working_edits_and_other_staged_files() {
+    let f = Fixture::new("file", &contents(&[]), &contents(&[1, 15, 35]));
+    f.git(&["add", "--all"]);
+    std::fs::write(f.file(), contents(&[1, 15, 25, 35])).unwrap();
+    std::fs::write(f.root.join("other"), b"keep staged").unwrap();
+    f.git(&["add", "--all"]);
+    // Restore an additional working-only edit after staging the other path.
+    std::fs::write(f.file(), contents(&[1, 15, 20, 25, 35])).unwrap();
+    let review = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+    desktop_git::unstage_hunk(&review, 0).unwrap();
+    assert_eq!(f.index(), contents(&[15, 25, 35]));
+    assert_eq!(f.git(&["show", ":other"]), b"keep staged");
+    assert_eq!(
+        std::fs::read(f.file()).unwrap(),
+        contents(&[1, 15, 20, 25, 35])
+    );
+}
+
+#[test]
+fn reverse_hunk_coordinates_remain_correct_after_an_earlier_insertion_is_removed() {
+    let work = String::from_utf8(contents(&[35]))
+        .unwrap()
+        .replace("line 010\n", "inserted one\ninserted two\nline 010\n");
+    let f = Fixture::new("file", &contents(&[]), work.as_bytes());
+    f.git(&["add", "--all"]);
+    let review = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+    assert_eq!(review.hunks.len(), 2);
+    desktop_git::unstage_hunk(&review, 0).unwrap();
+    assert_eq!(f.index(), contents(&[35]));
+    let fresh = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+    assert_eq!(fresh.hunks.len(), 1);
+    desktop_git::unstage_hunk(&fresh, 0).unwrap();
+    assert_eq!(f.index(), contents(&[]));
+    assert_eq!(std::fs::read(f.file()).unwrap(), work.as_bytes());
+}
+
+#[test]
+fn staged_and_unstaged_reviews_cannot_authorize_the_opposite_index_action() {
+    let f = Fixture::new("file", &contents(&[]), &contents(&[10]));
+    f.git(&["add", "--all"]);
+    std::fs::write(f.file(), contents(&[10, 35])).unwrap();
+    let staged = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+    let unstaged = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    let before = f.basis();
+    assert!(desktop_git::stage_hunk(&staged, 0).is_err());
+    assert!(desktop_git::unstage_hunk(&unstaged, 0).is_err());
+    let mut forged = unstaged;
+    forged.side = desktop_core::HunkSide::Staged;
+    assert!(desktop_git::unstage_hunk(&forged, 0).is_err());
+    assert!(desktop_git::unstage_hunk(&staged, 999).is_err());
+    assert_eq!(f.basis(), before);
+}
+
+#[test]
+fn staged_reviews_reject_changed_inputs_and_index_lock_failures_without_losing_data() {
+    for mutation in ["working", "index", "head", "attributes", "settings", "lock"] {
+        let f = Fixture::new("file", &contents(&[]), &contents(&[10, 35]));
+        f.git(&["add", "--all"]);
+        let review = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+        match mutation {
+            "working" => std::fs::write(f.file(), contents(&[11, 35])).unwrap(),
+            "index" => {
+                std::fs::write(f.root.join("other"), b"new").unwrap();
+                f.git(&["add", "--all"]);
+            }
+            "head" => {
+                f.git(&["commit", "-m", "external commit"]);
+            }
+            "attributes" => {
+                std::fs::write(f.root.join(".git/info/attributes"), b"file text\n").unwrap()
+            }
+            "settings" => {
+                f.git(&["config", "core.safecrlf", "true"]);
+            }
+            _ => std::fs::write(f.root.join(".git/index.lock"), b"fixture lock").unwrap(),
+        }
+        let before = f.basis();
+        let bytes = std::fs::read(f.file()).unwrap();
+        assert!(desktop_git::unstage_hunk(&review, 0).is_err(), "{mutation}");
+        assert_eq!(f.basis(), before);
+        assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn staged_patch_limits_and_unsupported_types_never_apply_a_prefix() {
+    for kind in ["binary", "encoding", "new", "deleted", "filter", "large"] {
+        let f = Fixture::new("file", b"base\n", b"edited\n");
+        match kind {
+            "binary" => std::fs::write(f.file(), b"binary\0bytes").unwrap(),
+            "encoding" => std::fs::write(f.file(), b"invalid-\xff\n").unwrap(),
+            "new" => {
+                f.git(&["rm", "--cached", "--", "file"]);
+                f.git(&["commit", "-m", "remove from HEAD"]);
+            }
+            "deleted" => std::fs::remove_file(f.file()).unwrap(),
+            "large" => std::fs::write(f.file(), vec![b'x'; 600_000]).unwrap(),
+            _ => {}
+        }
+        f.git(&["add", "--all"]);
+        if kind == "filter" {
+            std::fs::write(
+                f.root.join(".git/info/attributes"),
+                b"file filter=example\n",
+            )
+            .unwrap();
+        }
+        let before = f.basis();
+        assert!(
+            desktop_git::review_staged_hunks(&f.root, &f.change()).is_err(),
+            "{kind}"
+        );
+        assert_eq!(f.basis(), before);
+    }
+    for count in [128, 129] {
+        let base = (0..count * 12)
+            .map(|n| format!("line {n}\n"))
+            .collect::<String>();
+        let work = (0..count * 12)
+            .map(|n| format!("line {n}{}\n", if n % 12 == 5 { " changed" } else { "" }))
+            .collect::<String>();
+        let f = Fixture::new("file", base.as_bytes(), work.as_bytes());
+        f.git(&["add", "--all"]);
+        let before = f.basis();
+        let review = desktop_git::review_staged_hunks(&f.root, &f.change());
+        if count == 128 {
+            assert_eq!(review.unwrap().hunks.len(), 128);
+        } else {
+            assert!(review.is_err());
+        }
+        assert_eq!(f.basis(), before);
+    }
+}
+
+#[test]
+fn staged_crlf_eof_and_quoted_paths_reverse_without_writing_the_working_file() {
+    let mut names = vec![PathBuf::from("file"), PathBuf::from(":(glob)*\n\tfile")];
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        names.push(PathBuf::from(OsStr::from_bytes(b"file-\xff")));
+    }
+    for name in names {
+        for (base, work) in [
+            (b"old".as_slice(), b"new".as_slice()),
+            (b"a\r\nb\r\n", b"a\r\nc\r\n"),
+            (b"", b"added\n"),
+            (b"removed\n", b""),
+        ] {
+            let f = Fixture::new(&name, base, work);
+            f.git(&["add", "--all"]);
+            let review = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+            desktop_git::unstage_hunk(&review, 0).unwrap();
+            assert_eq!(f.index(), base);
+            assert_eq!(std::fs::read(f.file()).unwrap(), work);
+        }
+    }
+}

@@ -57,13 +57,22 @@ impl Desktop {
                 self.update_history(history::Event::OlderCommitsLoaded(result))
             }
             Message::Select(change) => self.update_changes(changes::Event::Select(change)),
-            Message::ReviewHunks(change) => {
-                self.update_changes(changes::Event::ReviewHunks(change))
+            Message::ReviewHunks(change) => self.update_changes(changes::Event::ReviewHunks(
+                change,
+                crate::HunkSide::Unstaged,
+            )),
+            Message::ReviewStagedHunks(change) => {
+                self.update_changes(changes::Event::ReviewHunks(change, crate::HunkSide::Staged))
+            }
+            Message::UnstageHunk(index) => {
+                self.update_changes(changes::Event::StageHunk(index, crate::HunkSide::Staged))
             }
             Message::HunksReviewed(result) => {
                 self.update_changes(changes::Event::HunksReviewed(result.map(Box::new)))
             }
-            Message::StageHunk(index) => self.update_changes(changes::Event::StageHunk(index)),
+            Message::StageHunk(index) => {
+                self.update_changes(changes::Event::StageHunk(index, crate::HunkSide::Unstaged))
+            }
             Message::CancelHunks => self.update_changes(changes::Event::CancelHunks),
             Message::DiffLoaded(result) => self.update_changes(changes::Event::DiffLoaded(result)),
             Message::ReviewConflict(change) => {

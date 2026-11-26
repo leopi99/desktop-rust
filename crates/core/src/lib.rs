@@ -64,9 +64,20 @@ pub struct FileDiff {
     pub unstaged: String,
 }
 
-/// Complete review authorizing one unchanged working-tree hunk to be staged.
+/// Which immutable comparison a hunk review describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HunkSide {
+    /// Index to working tree; forward application stages a block.
+    Unstaged,
+    /// HEAD to index; reverse application unstages a block.
+    Staged,
+}
+
+/// Complete review binding one comparison and its permitted index-only action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HunkReview {
+    /// Comparison direction, bound into freshness and write validation.
+    pub side: HunkSide,
     /// Repository whose index will be updated.
     pub repository: Repository,
     /// Exact observed tracked-file status and native path.

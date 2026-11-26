@@ -7,8 +7,8 @@ mod update;
 use desktop_core::{
     CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, ConflictSide,
     ConflictSideContent, ConflictSidePreview, ConflictSideResolutionReview, ConflictWorkingContent,
-    FileChange, FileDiff, GitRuntime, HunkReview, LocalBranch, MergeKind, MergePreview, RebaseKind,
-    RebasePreview, Remote, RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
+    FileChange, FileDiff, GitRuntime, HunkReview, HunkSide, LocalBranch, MergeKind, MergePreview,
+    RebaseKind, RebasePreview, Remote, RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
 use iced::futures::SinkExt;
@@ -99,8 +99,10 @@ enum Message {
     OlderCommitsLoaded(Result<Vec<CommitSummary>, String>),
     Select(FileChange),
     ReviewHunks(FileChange),
+    ReviewStagedHunks(FileChange),
     HunksReviewed(Result<HunkReview, String>),
     StageHunk(usize),
+    UnstageHunk(usize),
     CancelHunks,
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
@@ -1347,6 +1349,7 @@ mod tests {
         let mut app = loaded();
         let snapshot = app.snapshot.as_ref().unwrap();
         let review = HunkReview {
+            side: HunkSide::Unstaged,
             repository: snapshot.repository.clone(),
             change: FileChange {
                 path: "file".into(),
@@ -1436,6 +1439,71 @@ mod tests {
         let _ = app.update(Message::CancelHunks);
         assert!(app.loading);
         assert!(app.hunk_review.is_some());
+    }
+
+    fn staged_hunk_app() -> Desktop {
+        let mut app = hunk_app();
+        let mut review = (*app.hunk_review.take().unwrap()).clone();
+        review.side = HunkSide::Staged;
+        review.change.index = 'M';
+        let _ = app.update(Message::HunksReviewed(Ok(review)));
+        app
+    }
+
+    #[test]
+    fn staged_hunk_review_only_authorizes_unstaging_and_preserves_drafts_on_failure() {
+        let mut app = staged_hunk_app();
+        let _ = app.update(Message::StageHunk(0));
+        assert!(!app.loading);
+        assert!(app.hunk_review.is_some());
+        let _ = app.update(Message::UnstageHunk(99));
+        assert!(!app.loading);
+        let _ = app.update(Message::UnstageHunk(0));
+        assert!(app.loading);
+        assert!(app.hunk_review.is_none());
+        let _ = app.update(Message::CancelHunks);
+        let _ = app.update(Message::UnstageHunk(0));
+        let _ = app.update(Message::Wrote(Operation::Index, Err("index locked".into())));
+        assert!(app.loading);
+        assert!(app.notice.contains("index locked"));
+        let _ = app.update(Message::Refreshed(Err("refresh failed".into())));
+        assert!(!app.loading);
+        assert!(app.hunk_review.is_none());
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+        let mut app = hunk_app();
+        let _ = app.update(Message::UnstageHunk(0));
+        assert!(!app.loading);
+        assert!(app.hunk_review.is_some());
+    }
+
+    #[test]
+    fn staged_hunk_requests_respect_navigation_busy_state_and_review_invalidation() {
+        for state in ["navigation", "refresh", "busy", "off-panel"] {
+            let mut app = staged_hunk_app();
+            let change = app.hunk_review.as_ref().unwrap().change.clone();
+            match state {
+                "navigation" => {
+                    let _ = app.update(Message::PanelSelected(Panel::History));
+                }
+                "refresh" => {
+                    let _ = app.update(Message::Refreshed(Err("refresh failed".into())));
+                }
+                "busy" => app.loading = true,
+                _ => app.panel = Panel::Branches,
+            }
+            let _ = app.update(Message::UnstageHunk(0));
+            if matches!(state, "busy" | "off-panel") {
+                let _ = app.update(Message::ReviewStagedHunks(change));
+                assert_eq!(app.loading, state == "busy");
+                assert!(app.hunk_review.is_some());
+            } else {
+                assert!(!app.loading);
+                assert!(app.hunk_review.is_none());
+            }
+            assert_eq!(app.summary, "Summary");
+            assert_eq!(app.description, "Details");
+        }
     }
 
     fn history_commit(number: usize) -> CommitSummary {

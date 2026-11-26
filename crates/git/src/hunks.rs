@@ -1,5 +1,5 @@
 //! Complete context-bearing patch review and index-only staging of one hunk.
-use desktop_core::{ConflictWorkingContent, FileChange, HunkReview};
+use desktop_core::{ConflictWorkingContent, FileChange, HunkReview, HunkSide};
 use std::{ffi::OsStr, io, path::Path};
 
 fn invalid() -> io::Error {
@@ -96,14 +96,32 @@ fn parse(patch: String) -> io::Result<(String, Vec<String>)> {
 /// Returns an error for stale/unsupported state, binary/non-UTF-8/oversized data,
 /// conversion settings, malformed patches or Git/I/O failure. No writes occur.
 pub fn review_hunks(path: &Path, selected: &FileChange) -> io::Result<HunkReview> {
+    review(path, selected, HunkSide::Unstaged)
+}
+
+/// Review complete staged hunks of one existing regular UTF-8 text file.
+/// Each reviewed block can be removed from the index without writing the working
+/// file. Limits and conversion exclusions match the unstaged review.
+///
+/// # Errors
+///
+/// Returns an error for stale/unsupported status, active operations, non-text or
+/// oversized data, conversions, malformed patch output or Git/I/O failure.
+pub fn review_staged_hunks(path: &Path, selected: &FileChange) -> io::Result<HunkReview> {
+    review(path, selected, HunkSide::Staged)
+}
+
+fn review(path: &Path, selected: &FileChange, side: HunkSide) -> io::Result<HunkReview> {
     let state = super::snapshot(path)?;
     if !state.changes.contains(selected)
         || selected.original_path.is_some()
-        || selected.worktree != 'M'
-        || !matches!(selected.index, ' ' | 'M')
+        || !match side {
+            HunkSide::Unstaged => selected.worktree == 'M' && matches!(selected.index, ' ' | 'M'),
+            HunkSide::Staged => selected.index == 'M' && matches!(selected.worktree, ' ' | 'M'),
+        }
     {
         return Err(io::Error::other(
-            "Hunk staging requires an existing, unrenamed tracked modification",
+            "Hunk operations require an existing, unrenamed tracked modification on the chosen side",
         ));
     }
     let root = &state.repository.path;
@@ -114,7 +132,7 @@ pub fn review_hunks(path: &Path, selected: &FileChange) -> io::Result<HunkReview
         return Err(invalid());
     }
     let (attributes, settings) = super::conflicts::conversion_policy(root, &selected.path)?;
-    let args = [
+    let mut args = vec![
         OsStr::new("-c"),
         OsStr::new("core.quotePath=true"),
         OsStr::new("-c"),
@@ -135,9 +153,11 @@ pub fn review_hunks(path: &Path, selected: &FileChange) -> io::Result<HunkReview
         OsStr::new("--output-indicator-new=+"),
         OsStr::new("--output-indicator-old=-"),
         OsStr::new("--output-indicator-context= "),
-        OsStr::new("--"),
-        selected.path.as_os_str(),
     ];
+    if side == HunkSide::Staged {
+        args.push(OsStr::new("--cached"));
+    }
+    args.extend([OsStr::new("--"), selected.path.as_os_str()]);
     let raw = super::read_output::complete(root, &args, 512 * 1024)?;
     let (header, hunks) = parse(String::from_utf8(raw).map_err(|_| invalid())?)?;
     let (current_attributes, current_settings) =
@@ -153,6 +173,7 @@ pub fn review_hunks(path: &Path, selected: &FileChange) -> io::Result<HunkReview
         ));
     }
     Ok(HunkReview {
+        side,
         repository: state.repository,
         change: selected.clone(),
         basis: state.commit_basis,
@@ -170,51 +191,72 @@ pub fn review_hunks(path: &Path, selected: &FileChange) -> io::Result<HunkReview
 ///
 /// # Errors
 ///
-/// Returns an error for stale reviews, invalid hunk indices, failed patch checks,
+/// Returns an error for wrong-side/stale reviews, invalid hunk indices, failed patch checks,
 /// Git/index-lock rejection or changed working contents after application. Refresh
 /// after any write error; no automatic rollback overwrites later edits.
 pub fn stage_hunk(review: &HunkReview, index: usize) -> io::Result<String> {
+    apply_hunk(review, index, HunkSide::Unstaged)
+}
+
+/// Remove one freshly reviewed staged hunk from the index, working files intact.
+/// Only staged-side reviews are accepted; forward-stage reviews cannot authorize
+/// this reverse operation. External clients/hooks can still race preflight.
+///
+/// # Errors
+///
+/// Returns an error for wrong-side/stale reviews, invalid indices, patch-check or
+/// index-write failures, or changed working contents after the operation. Refresh
+/// after a write error; no automatic rollback replaces later edits.
+pub fn unstage_hunk(review: &HunkReview, index: usize) -> io::Result<String> {
+    apply_hunk(review, index, HunkSide::Staged)
+}
+
+fn apply_hunk(review: &HunkReview, index: usize, side: HunkSide) -> io::Result<String> {
+    if review.side != side {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Review the matching staged or unstaged side before changing the index",
+        ));
+    }
     let _guard = super::WRITE_LOCK
         .lock()
         .map_err(|_| io::Error::other("Write lock poisoned"))?;
     let hunk = review.hunks.get(index).ok_or_else(invalid)?;
     let root = &review.repository.path;
-    if review_hunks(root, &review.change)? != *review {
+    if self::review(root, &review.change, side)? != *review {
         return Err(io::Error::other(
-            "Hunk review changed; review again before staging",
+            "Hunk review changed; review the matching side again before updating the index",
         ));
     }
     let patch = format!("{}{hunk}", review.header);
-    super::run_write(
-        root,
-        &[
-            "apply",
-            "--cached",
-            "--check",
-            "--whitespace=nowarn",
-            "--",
-            "-",
-        ],
-        Some(&patch),
-    )?;
-    super::run_write(
-        root,
-        &["apply", "--cached", "--whitespace=nowarn", "--", "-"],
-        Some(&patch),
-    )
-    .map_err(|error| {
+    let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
+    if side == HunkSide::Staged {
+        args.push("--reverse");
+    }
+    let mut check = args.clone();
+    check.extend(["--check", "--", "-"]);
+    super::run_write(root, &check, Some(&patch))?;
+    args.extend(["--", "-"]);
+    super::run_write(root, &args, Some(&patch)).map_err(|error| {
         io::Error::new(
             error.kind(),
-            format!("Hunk staging failed; index may have changed, refresh and inspect: {error}"),
+            format!(
+                "Hunk index update failed; index may have changed, refresh and inspect: {error}"
+            ),
         )
     })?;
     if super::conflicts::working_content(root, &review.change.path)? != review.working {
         return Err(io::Error::other(
-            "Working file changed during hunk staging; refresh and inspect",
+            "Working file changed during hunk index update; refresh and inspect",
         ));
     }
     Ok(format!(
-        "Staged hunk {} of {}; working file retained",
+        "{} hunk {} of {}; working file retained",
+        if side == HunkSide::Staged {
+            "Unstaged"
+        } else {
+            "Staged"
+        },
         index + 1,
         review.change.path.display()
     ))

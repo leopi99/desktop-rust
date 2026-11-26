@@ -9,9 +9,9 @@ use iced::Task;
 #[derive(Debug)]
 pub(super) enum Event {
     Select(FileChange),
-    ReviewHunks(FileChange),
+    ReviewHunks(FileChange, crate::HunkSide),
     HunksReviewed(Result<Box<crate::HunkReview>, String>),
-    StageHunk(usize),
+    StageHunk(usize, crate::HunkSide),
     CancelHunks,
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
@@ -47,16 +47,23 @@ impl Desktop {
                     );
                 }
             }
-            Event::ReviewHunks(change) if !self.loading && self.panel == crate::Panel::Changes => {
+            Event::ReviewHunks(change, side)
+                if !self.loading && self.panel == crate::Panel::Changes =>
+            {
                 if let Some(snapshot) = &self.snapshot {
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
                     self.side_resolution_review = None;
                     self.hunk_review = None;
                     self.loading = true;
-                    self.detail = String::from("Reviewing complete unstaged hunks…");
+                    self.detail = format!("Reviewing complete {side:?} hunks…");
                     return worker(
-                        move || desktop_git::review_hunks(&path, &change),
+                        move || match side {
+                            crate::HunkSide::Unstaged => desktop_git::review_hunks(&path, &change),
+                            crate::HunkSide::Staged => {
+                                desktop_git::review_staged_hunks(&path, &change)
+                            }
+                        },
                         Message::HunksReviewed,
                     );
                 }
@@ -71,17 +78,26 @@ impl Desktop {
                     Err(error) => self.detail = format!("Unable to review hunks: {error}"),
                 }
             }
-            Event::StageHunk(index) if !self.loading && self.panel == crate::Panel::Changes => {
+            Event::StageHunk(index, side)
+                if !self.loading && self.panel == crate::Panel::Changes =>
+            {
                 if self
                     .hunk_review
                     .as_ref()
-                    .is_some_and(|review| index < review.hunks.len())
+                    .is_some_and(|review| index < review.hunks.len() && review.side == side)
                 {
                     if let Some(review) = self.hunk_review.take() {
                         self.loading = true;
-                        self.notice = String::from("Staging reviewed hunk…");
+                        self.notice = format!("Updating reviewed {side:?} hunk…");
                         return worker(
-                            move || desktop_git::stage_hunk(&review, index),
+                            move || match side {
+                                crate::HunkSide::Unstaged => {
+                                    desktop_git::stage_hunk(&review, index)
+                                }
+                                crate::HunkSide::Staged => {
+                                    desktop_git::unstage_hunk(&review, index)
+                                }
+                            },
                             |result| Message::Wrote(Operation::Index, result),
                         );
                     }
