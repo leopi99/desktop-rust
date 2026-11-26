@@ -627,3 +627,26 @@ redraw and retarget/interruption behavior, modifiers/Enter, pointer/touch and
 selection-only delivery preserving drafts. This does not port DOM accessibility,
 tri-state values, double-click propagation or all upstream selection semantics.
 UI-01/UI-07 and the complete baseline remain open; no checkpoint advances.
+
+## Changed-file and read-review keyboard controls
+
+Selected functions in the pinned [Changes sidebar](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/changes/sidebar.tsx)
+map selected row indices to working-directory files and dispatch file selection.
+The sidebar separately handles keyboard row clicks by toggling file inclusion,
+including clearing partial inclusion. Its rendered filter/list receives both
+selection and row-click callbacks. This is a targeted source observation, not a
+complete inspection of the filter/list, its keyboard selection model or tests.
+
+The Rust preview now makes changed-file buttons and read-only hunk/conflict
+preview controls focusable with Tab/Shift+Tab and activatable once on Enter/Space
+release. A changed native repository/file/original path, status or action resets
+focus and cancels an armed gesture; ordinary equal-target redraws retain it.
+Existing read messages/busy guards are reused, without adding Git writes or
+changing patch application. Five real-widget/event regressions cover traversal,
+read-action delivery, repeats/redraws, target replacement, native paths,
+pointer/touch and existing draft/review invalidation rules.
+
+This preview opens a diff when activating a file button. It does not implement
+upstream keyboard inclusion toggling, multi-selection, roving list focus,
+filtering or full list accessibility. Native keyboard/IME/HiDPI/accessibility
+execution and UI-01/UI-08 remain open. No upstream checkpoint advances.

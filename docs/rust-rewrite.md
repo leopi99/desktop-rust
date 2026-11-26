@@ -749,7 +749,8 @@ sidebar content, including long paths with the software renderer. Views live in
 `crates/ui/src/layout.rs`; Git operations and their freshness checks are unchanged.
 
 Tab and Shift+Tab cycle forward/backward through the current text inputs and
-enabled sidebar panel buttons, in widget-tree order. Disabled navigation controls
+enabled sidebar panel buttons, changed-file buttons and read-only review controls,
+in widget-tree order. Disabled navigation controls
 are skipped. Only otherwise unhandled Tab presses are mapped; Ctrl/Alt/Super
 combinations and captured keys retain their existing behavior. The sole focused
 input retains its cursor on a full cycle.
@@ -758,8 +759,13 @@ A focused sidebar button has a visible outline. Press and release Enter or Space
 to open its panel; holding/repeating the key does not repeatedly navigate. Losing
 focus, changing modifiers, disabling or changing the button target cancels its
 armed activation. Navigation uses the existing busy guard and draft/review rules.
-Pointer/touch clicks retain their existing behavior. This extension covers panel
-navigation; Git action buttons retain their existing controls.
+Pointer/touch clicks retain their existing behavior. Changed-file buttons open a
+read-only diff; hunk-review and conflict-preview buttons use the same Enter/Space
+release behavior. Their identity includes the native repository path, current and
+original file paths, observed index/worktree status and read action. Changing that
+identity cancels focus/armed activation; ordinary redraws retain it. These controls
+reuse existing busy guards and invalidate obsolete reviews while preserving drafts.
+Stage/unstage, commit and conflict-resolution write buttons keep separate controls.
 
 Hunk-review checkboxes participate in Tab/Shift+Tab navigation and focus reveal.
 Press and release Space to include/exclude a hunk or changed line; Enter does not

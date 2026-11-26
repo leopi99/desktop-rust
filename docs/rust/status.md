@@ -42,7 +42,7 @@ PR #9 consolidated the Rust quality/runtime/workflow batch on 2026-11-26 at
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
-| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal and focus reveal for text inputs, enabled sidebar navigation and review checkboxes on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
+| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab traversal and focus reveal for text inputs, enabled sidebar navigation, review checkboxes and changed-file/read-review buttons on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
 | Engine | External Git version/error reports; Unix probe/history/patch deadlines and capture caps, tested on Linux | Windows probe/history/patch/process-tree bounds; stalled-write deadline/cancellation policy; bundled Git/update/capability policy. |
 | Upstream | Weekly discovery, ledger validator, daily watchdog; successful manual runs | Observe scheduled runs, complete initial baseline inventory and port applicable behavior. |
 | Delivery | Linux prototype builds and isolated fixture coverage | Packaging, signing, native account adapters and Windows/macOS release verification. |
@@ -176,6 +176,36 @@ index, config, status and ref signatures
 (`/tmp/desktop-rust-checkbox-captures-bg1wcf8v`). These captures show selection
 layout, not native keyboard delivery or a focused-checkbox session. UI-01/UI-07,
 full accessibility/IME/HiDPI and baseline analysis remain open; no checkpoint moves.
+
+### Changed-file and read-review keyboard controls
+
+Increment [a74e9ce431](https://github.com/leopi99/desktop-rust/commit/a74e9ce4318c8bb1aba9fcb4d3f4849a7479bce7): changed-file buttons and the read-only hunk/conflict preview controls reuse
+the navigation widget's Tab/Shift+Tab traversal, annotated focus reveal, visible
+focus and single Enter/Space release activation. The typed target contains the
+native repository path, full FileChange (including original path/status) and read
+action. Replacing that target or disabling it resets focus and armed activation;
+ordinary equal-target redraws retain it. Git write controls remain separate.
+
+Five new real-widget/event regressions cover mixed traversal/disabled controls,
+all six read actions with repeats and redraw, repository/file/status/action
+retargeting, pointer/touch/native paths and late busy delivery. Selecting a file
+uses existing review/selection invalidation and preserves message drafts. Existing
+navigation interruption/modifier and pointer tests also pass with the shared
+widget. The complete local gate passes 441 Rust tests (140 UI), 10 compiler/policy
+tests, formatter, all-target/all-feature Clippy and warning-free rustdoc. All 32
+upstream tests, the registry validator and npm lint pass. Logs use the prefix
+`/tmp/desktop-rust-file-navigation-`. No root UI message, dependency, Git adapter
+or write protocol changes.
+
+The eight-panel/three-diagnostic smoke passes at 960×640 with unchanged data
+(`/tmp/desktop-rust-file-navigation-smoke-960`). Read-only line-selection and
+conflict-side review captures at 960×640 and 1200×800 were visually inspected,
+with unchanged file/index/config/status/ref signatures
+(`/tmp/desktop-rust-file-navigation-captures-epj06cpm`). These resting captures do
+not establish a native keyboard session. UI-01/UI-08, keyboard access to Git write
+controls and complete interaction/accessibility QA remain open. Upstream list
+inclusion/multi-selection semantics are not ported by this change; no checkpoint
+advances.
 
 ## Merged batch: Rust quality and process hardening
 
