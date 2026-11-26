@@ -1,3 +1,6 @@
+//! Git integration coverage for history.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, CommitFile};
 use std::{
     collections::HashSet,
@@ -297,4 +300,89 @@ fn large_messages_and_committed_diffs_have_bounded_previews() {
     let patch = desktop_git::commit_file_diff(&f.repo, &f.oid(), file).unwrap();
     assert!(patch.contains("preview truncated"));
     assert!(patch.len() < 257 * 1024);
+}
+
+#[test]
+fn multi_megabyte_history_previews_preserve_repository_data() {
+    let f = Fixture::new();
+    f.write("large", &vec![b'x'; 2 * 1024 * 1024]);
+    let message_file = f.root.join("message");
+    std::fs::write(
+        &message_file,
+        format!("Large body\n\n{}", "body ".repeat(600_000)),
+    )
+    .unwrap();
+    git(&f.repo, &["add", "--all"]);
+    git(
+        &f.repo,
+        &["commit", "--file", message_file.to_str().unwrap()],
+    );
+    f.write("file", b"uncommitted change\n");
+    let before = f.basis();
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    let head = f.oid();
+    let details = desktop_git::commit_details(&f.repo, &head).unwrap();
+    assert_eq!(details.commit.subject, "Large body");
+    assert!(details.message.starts_with("Large body\n\nbody "));
+    assert!(details
+        .message
+        .ends_with("[Commit message preview truncated]"));
+    assert!(details.message.len() < 65 * 1024);
+    let selected = details
+        .files
+        .iter()
+        .find(|file| file.path == Path::new("large"))
+        .unwrap();
+    let patch = desktop_git::commit_file_diff(&f.repo, &head, selected).unwrap();
+    assert!(patch.contains("+xxxxxxxx"));
+    assert!(patch.ends_with("[Committed diff preview truncated]"));
+    assert!(patch.len() < 257 * 1024);
+    assert_eq!(f.basis(), before);
+    assert_eq!(f.oid(), head);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert_eq!(
+        std::fs::read(f.repo.join("file")).unwrap(),
+        b"uncommitted change\n"
+    );
+    assert_eq!(
+        std::fs::read(f.repo.join("large")).unwrap(),
+        vec![b'x'; 2 * 1024 * 1024]
+    );
+}
+
+#[test]
+fn oversized_subjects_fail_complete_reads_without_mutation() {
+    let f = Fixture::new();
+    let message_file = f.root.join("message");
+    std::fs::write(&message_file, "s".repeat(2 * 1024 * 1024)).unwrap();
+    git(
+        &f.repo,
+        &[
+            "commit",
+            "--allow-empty",
+            "--file",
+            message_file.to_str().unwrap(),
+        ],
+    );
+    f.write("file", b"uncommitted change\n");
+    let head = f.oid();
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    assert_eq!(
+        desktop_git::commit_history(&f.repo, &head, 0)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::commit_details(&f.repo, &head)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.oid(), head);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert_eq!(
+        std::fs::read(f.repo.join("file")).unwrap(),
+        b"uncommitted change\n"
+    );
 }

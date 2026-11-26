@@ -1,3 +1,6 @@
+//! Git integration coverage for merge.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, LocalBranch, MergeKind, MergePreview};
 use std::{
     path::{Path, PathBuf},
@@ -378,4 +381,38 @@ fn resolved_but_unfinished_cherry_pick_blocks_starting_a_merge() {
     assert!(desktop_git::snapshot(&f.repo).unwrap().changes.is_empty());
     let error = desktop_git::preview_merge(&f.repo, &f.target(), &f.basis()).unwrap_err();
     assert!(error.to_string().contains("existing Git operation"));
+}
+
+#[cfg(unix)]
+#[test]
+fn noisy_merge_driver_overflow_refuses_preview_without_changing_user_state() {
+    let f = Fixture::new();
+    f.advance_feature("base", b"feature side\n");
+    f.write("base", b"main side\n");
+    f.commit("main conflict");
+    std::fs::write(f.repo.join(".git/info/attributes"), b"base merge=noisy\n").unwrap();
+    git(
+        &f.repo,
+        &[
+            "config",
+            "merge.noisy.driver",
+            "head -c 100000 /dev/zero >&2; printf 'driver completed' >&2; exit 1",
+        ],
+    );
+    let before = f.basis();
+    let refs = git(&f.repo, &["show-ref"]);
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    assert_eq!(
+        desktop_git::preview_merge(&f.repo, &f.target(), &before)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(git(&f.repo, &["show-ref"]), refs);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), b"main side\n");
+    assert!(!f.repo.join(".git/MERGE_HEAD").exists());
+    std::fs::write(f.repo.join(".git/info/attributes"), b"").unwrap();
+    assert_eq!(f.preview().kind, MergeKind::Conflicts);
 }

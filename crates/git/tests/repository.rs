@@ -1,3 +1,6 @@
+//! Git integration coverage for repository.
+#![cfg(test)]
+
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -954,4 +957,302 @@ fn pre_cancelled_clone_never_creates_destination() {
         .unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
     assert!(!target.exists());
+}
+
+#[test]
+fn large_tracked_previews_preserve_index_and_worktree_and_still_stage_full_files() {
+    let repo = Fixture::new();
+    repo.write("file", b"base\n");
+    repo.commit();
+    let staged = "staged line\n".repeat(220_000);
+    repo.write("file", staged.as_bytes());
+    repo.git(&["add", "--", "file"]);
+    let working = "working line\n".repeat(230_000);
+    repo.write("file", working.as_bytes());
+    let state = desktop_git::snapshot(&repo.0).unwrap();
+    let index = std::fs::read(repo.0.join(".git/index")).unwrap();
+    let diff = desktop_git::diff(&repo.0, &state.changes[0]).unwrap();
+    assert!(diff.staged.contains("+staged line"));
+    assert!(diff.unstaged.contains("-staged line"));
+    assert!(!diff.staged.contains("working line"));
+    assert!(diff.staged.ends_with("[Staged diff preview truncated]"));
+    assert!(diff.unstaged.ends_with("[Unstaged diff preview truncated]"));
+    assert!(diff.staged.len() < 257 * 1024);
+    assert!(diff.unstaged.len() < 257 * 1024);
+    assert_eq!(std::fs::read(repo.0.join(".git/index")).unwrap(), index);
+    assert_eq!(
+        std::fs::read(repo.0.join("file")).unwrap(),
+        working.as_bytes()
+    );
+    assert_eq!(
+        desktop_git::snapshot(&repo.0).unwrap().commit_basis,
+        state.commit_basis
+    );
+    desktop_git::stage(&repo.0, &state.changes[0]).unwrap();
+    let stored = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["show", ":file"])
+        .output()
+        .unwrap();
+    assert!(stored.status.success());
+    assert_eq!(stored.stdout, working.as_bytes());
+    assert_eq!(
+        std::fs::read(repo.0.join("file")).unwrap(),
+        working.as_bytes()
+    );
+}
+
+#[test]
+fn large_unborn_staged_patch_is_marked_without_inventing_an_unstaged_diff() {
+    let repo = Fixture::new();
+    repo.write("new", &vec![b'x'; 2 * 1024 * 1024]);
+    repo.git(&["add", "--", "new"]);
+    let state = desktop_git::snapshot(&repo.0).unwrap();
+    let before = std::fs::read(repo.0.join(".git/index")).unwrap();
+    let diff = desktop_git::diff(&repo.0, &state.changes[0]).unwrap();
+    assert!(diff.staged.contains("+xxxxxxxx"));
+    assert!(diff.staged.ends_with("[Staged diff preview truncated]"));
+    assert!(diff.staged.len() < 257 * 1024);
+    assert!(diff.unstaged.is_empty());
+    assert_eq!(std::fs::read(repo.0.join(".git/index")).unwrap(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn clipped_tracked_diff_keeps_native_path_and_disables_textconv() {
+    use std::os::unix::ffi::OsStrExt;
+    let repo = Fixture::new();
+    let name = std::ffi::OsStr::from_bytes(b"file-\xff");
+    std::fs::write(repo.0.join(name), b"base\n").unwrap();
+    repo.commit();
+    repo.git(&["config", "diff.external", "nonexistent-diff-helper"]);
+    repo.git(&[
+        "config",
+        "diff.custom.textconv",
+        "nonexistent-textconv-helper",
+    ]);
+    std::fs::write(repo.0.join(".git/info/attributes"), b"* diff=custom\n").unwrap();
+    let content = vec![b'x'; 2 * 1024 * 1024];
+    std::fs::write(repo.0.join(name), &content).unwrap();
+    let state = desktop_git::snapshot(&repo.0).unwrap();
+    let selected = state
+        .changes
+        .iter()
+        .find(|change| change.path.as_os_str() == name)
+        .unwrap();
+    let diff = desktop_git::diff(&repo.0, selected).unwrap();
+    assert!(diff.staged.is_empty());
+    assert!(diff.unstaged.contains("+xxxxxxxx"));
+    assert!(diff.unstaged.ends_with("[Unstaged diff preview truncated]"));
+    assert!(diff.unstaged.len() < 257 * 1024);
+    assert_eq!(std::fs::read(repo.0.join(name)).unwrap(), content);
+}
+
+#[cfg(unix)]
+fn noisy_commit_hook(repo: &Fixture, reject: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let hooks = repo.0.join(".git/hooks");
+    repo.git(&["config", "core.hooksPath", hooks.to_str().unwrap()]);
+    let hook = hooks.join("pre-commit");
+    std::fs::write(&hook, format!("#!/bin/sh\nhead -c 2097152 /dev/zero\nhead -c 2097152 /dev/zero >&2\nprintf 'hook diagnostic tail' >&2\nexit {}\n", if reject { 1 } else { 0 })).unwrap();
+    std::fs::set_permissions(hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn noisy_rejected_hook_keeps_staged_and_working_data_and_allows_retry() {
+    let repo = Fixture::new();
+    repo.write("file", b"base\n");
+    repo.commit();
+    repo.write("file", b"staged\n");
+    repo.git(&["add", "--", "file"]);
+    repo.write("file", b"working\n");
+    repo.write("untracked", b"keep\n");
+    let before = desktop_git::snapshot(&repo.0).unwrap().commit_basis;
+    noisy_commit_hook(&repo, true);
+    let message = format!("Large rejected commit\n\n{}", "body line\n".repeat(250_000));
+    let error = desktop_git::commit(&repo.0, &message, &before)
+        .unwrap_err()
+        .to_string();
+    // Git routes hook stdout to its stderr as well.
+    assert!(error.contains("Git stderr earlier output truncated"));
+    assert!(error.ends_with("hook diagnostic tail"));
+    assert!(error.len() < 2 * 64 * 1024 + 200);
+    assert_eq!(desktop_git::snapshot(&repo.0).unwrap().commit_basis, before);
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+    assert_eq!(std::fs::read(repo.0.join("untracked")).unwrap(), b"keep\n");
+    repo.git(&["config", "core.hooksPath", "/dev/null"]);
+    desktop_git::commit(&repo.0, "Retry after hook failure", &before).unwrap();
+    let committed = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["show", "HEAD:file"])
+        .output()
+        .unwrap();
+    assert!(committed.status.success());
+    assert_eq!(committed.stdout, b"staged\n");
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn noisy_successful_hook_keeps_full_commit_message_and_unstaged_data() {
+    let repo = Fixture::new();
+    repo.write("file", b"staged\n");
+    repo.git(&["add", "--", "file"]);
+    repo.write("file", b"working\n");
+    let before = desktop_git::snapshot(&repo.0).unwrap().commit_basis;
+    noisy_commit_hook(&repo, false);
+    let message = format!(
+        "Large successful commit\n\n{}",
+        "body line\n".repeat(250_000)
+    );
+    let result = desktop_git::commit(&repo.0, &message, &before).unwrap();
+    assert!(result.contains("Large successful commit"));
+    assert!(!result.contains("hook diagnostic tail"));
+    assert!(result.len() < 64 * 1024 + 100);
+    let stored = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["log", "-1", "--format=%B"])
+        .output()
+        .unwrap();
+    assert!(stored.status.success());
+    assert_eq!(
+        String::from_utf8(stored.stdout)
+            .unwrap()
+            .trim_end_matches('\n'),
+        message.trim_end_matches('\n')
+    );
+    let committed = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["show", "HEAD:file"])
+        .output()
+        .unwrap();
+    assert!(committed.status.success());
+    assert_eq!(committed.stdout, b"staged\n");
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+}
+
+#[test]
+fn oversized_index_and_status_refuse_writes_without_losing_freshness_data() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let repo = Fixture::new();
+    repo.write("file", b"base\n");
+    repo.commit();
+    repo.write("file", b"working\n");
+    let observed = desktop_git::snapshot(&repo.0).unwrap();
+    let original_index = std::fs::read(repo.0.join(".git/index")).unwrap();
+    let blob = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["rev-parse", "HEAD:file"])
+        .output()
+        .unwrap();
+    assert!(blob.status.success());
+    let blob = String::from_utf8(blob.stdout).unwrap();
+    let component = "p".repeat(100);
+    let mut records = Vec::new();
+    for index in 0..33_000 {
+        records.extend_from_slice(format!("100644 {}\tvirtual/{index:05}/{component}/{component}/{component}/{component}/{component}/file\n", blob.trim()).as_bytes());
+    }
+    let mut update = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["update-index", "--index-info"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    update.stdin.take().unwrap().write_all(&records).unwrap();
+    let result = update.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let large_index = std::fs::read(repo.0.join(".git/index")).unwrap();
+    assert_eq!(
+        desktop_git::commit(
+            &repo.0,
+            "must not commit partial state",
+            &observed.commit_basis
+        )
+        .unwrap_err()
+        .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::stage(&repo.0, &observed.changes[0])
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::snapshot(&repo.0).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        std::fs::read(repo.0.join(".git/index")).unwrap(),
+        large_index
+    );
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+    let head = Command::new("git")
+        .arg("-C")
+        .arg(&repo.0)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(head.status.success());
+    assert_eq!(head.stdout, observed.commit_basis.head.unwrap().as_bytes());
+    // Restore only this disposable fixture's index, then verify a fresh operation succeeds.
+    std::fs::write(repo.0.join(".git/index"), original_index).unwrap();
+    desktop_git::stage(&repo.0, &observed.changes[0]).unwrap();
+    let refreshed = desktop_git::snapshot(&repo.0).unwrap();
+    desktop_git::commit(
+        &repo.0,
+        "Recovered after oversized scan",
+        &refreshed.commit_basis,
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"working\n");
+}
+
+#[test]
+fn oversized_branch_list_fails_instead_of_returning_a_partial_snapshot() {
+    let repo = Fixture::new();
+    repo.write("file", b"base\n");
+    repo.commit();
+    let before = desktop_git::snapshot(&repo.0).unwrap();
+    let oid = before.commit_basis.head.as_ref().unwrap().trim();
+    let mut packed = String::from("# pack-refs with: sorted\n");
+    for index in 0..40_000 {
+        packed.push_str(&format!(
+            "{oid} refs/heads/test-{index:05}-{}\n",
+            "b".repeat(100)
+        ));
+    }
+    std::fs::write(repo.0.join(".git/packed-refs"), &packed).unwrap();
+    assert_eq!(
+        desktop_git::snapshot(&repo.0).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.0.join(".git/packed-refs")).unwrap(),
+        packed
+    );
+    assert_eq!(std::fs::read(repo.0.join("file")).unwrap(), b"base\n");
+    std::fs::write(
+        repo.0.join(".git/packed-refs"),
+        b"# pack-refs with: sorted\n",
+    )
+    .unwrap();
+    assert_eq!(
+        desktop_git::snapshot(&repo.0).unwrap().commit_basis,
+        before.commit_basis
+    );
 }

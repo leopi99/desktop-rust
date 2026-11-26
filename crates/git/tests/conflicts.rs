@@ -1,4 +1,7 @@
-use desktop_core::{CommitBasis, ConflictContent, FileChange};
+//! Git integration coverage for conflicts.
+#![cfg(test)]
+
+use desktop_core::{CommitBasis, ConflictContent, ConflictSide, ConflictSideContent, FileChange};
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -46,6 +49,8 @@ impl Fixture {
             ("user.email", "test@example.invalid"),
             ("commit.gpgsign", "false"),
             ("core.hooksPath", "/dev/null"),
+            ("core.autocrlf", "false"),
+            ("core.attributesFile", "/dev/null"),
         ] {
             git(&fixture.repo, &["config", key, value]);
         }
@@ -243,4 +248,513 @@ fn symlink_content_is_never_read_during_conflict_review() {
     std::os::unix::fs::symlink(&outside, f.file()).unwrap();
     assert!(desktop_git::inspect_conflict(&f.repo, &f.change()).is_err());
     assert_eq!(std::fs::read(outside).unwrap(), b"outside content");
+}
+
+#[test]
+fn index_side_previews_keep_both_versions_and_user_state_unchanged() {
+    let f = Fixture::new("file");
+    let before = f.basis();
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    let working = std::fs::read(f.file()).unwrap();
+    for (side, expected) in [
+        (ConflictSide::Ours, "current\n"),
+        (ConflictSide::Theirs, "other\n"),
+    ] {
+        let preview = desktop_git::inspect_conflict_side(&f.repo, &f.change(), side).unwrap();
+        assert_eq!(preview.side, side);
+        assert!(preview.oid.is_some());
+        assert_eq!(preview.change.path, f.name);
+        assert_eq!(
+            preview.content,
+            ConflictSideContent::Text {
+                preview: expected.to_owned(),
+                truncated: false
+            }
+        );
+    }
+    assert_eq!(f.basis(), before);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert_eq!(std::fs::read(f.file()).unwrap(), working);
+}
+
+#[test]
+fn side_previews_identify_binary_data_and_bound_large_text_or_blob_reads() {
+    let f = Fixture::with_contents("binary", b"a\0b", b"c\0d", b"e\0f");
+    let before = f.basis();
+    let preview =
+        desktop_git::inspect_conflict_side(&f.repo, &f.change(), ConflictSide::Theirs).unwrap();
+    assert_eq!(preview.content, ConflictSideContent::Binary { size: 3 });
+    assert!(desktop_git::inspect_conflict(&f.repo, &f.change()).is_err());
+    assert_eq!(f.basis(), before);
+    assert_eq!(std::fs::read(f.file()).unwrap(), b"c\0d");
+    let f = Fixture::with_contents(
+        "large",
+        b"base\n",
+        "current\n".repeat(12_000).as_bytes(),
+        b"other\n",
+    );
+    let preview =
+        desktop_git::inspect_conflict_side(&f.repo, &f.change(), ConflictSide::Ours).unwrap();
+    match preview.content {
+        ConflictSideContent::Text { preview, truncated } => {
+            assert!(truncated);
+            assert_eq!(preview.len(), 64 * 1024);
+        }
+        other => panic!("unexpected preview: {other:?}"),
+    }
+    let large = vec![0; 9 * 1024 * 1024];
+    let f = Fixture::with_contents("oversized", b"base\n", &large, b"other\n");
+    let before = f.basis();
+    assert_eq!(
+        desktop_git::inspect_conflict_side(&f.repo, &f.change(), ConflictSide::Ours)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(std::fs::read(f.file()).unwrap(), large);
+}
+
+#[test]
+fn absent_side_is_a_deletion_in_both_modify_delete_directions() {
+    for deleted in [ConflictSide::Ours, ConflictSide::Theirs] {
+        let f = Fixture::new("file");
+        git(&f.repo, &["merge", "--abort"]);
+        git(
+            &f.repo,
+            &[
+                "checkout",
+                if deleted == ConflictSide::Ours {
+                    "main"
+                } else {
+                    "side"
+                },
+            ],
+        );
+        std::fs::remove_file(f.file()).unwrap();
+        f.commit("delete selected side");
+        git(&f.repo, &["checkout", "main"]);
+        let merge = Command::new("git")
+            .arg("-C")
+            .arg(&f.repo)
+            .args(["merge", "side"])
+            .output()
+            .unwrap();
+        assert!(!merge.status.success());
+        let before = f.basis();
+        let bytes = std::fs::read(f.file()).unwrap();
+        let preview = desktop_git::inspect_conflict_side(&f.repo, &f.change(), deleted).unwrap();
+        assert_eq!(preview.content, ConflictSideContent::Deleted);
+        assert!(preview.oid.is_none());
+        assert_eq!(f.basis(), before);
+        assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn index_side_paths_remain_literal_and_native() {
+    use std::os::unix::ffi::OsStrExt;
+    for name in [
+        PathBuf::from(":(glob)*\n\tfile"),
+        PathBuf::from(std::ffi::OsStr::from_bytes(b"native-\xff")),
+    ] {
+        let f = Fixture::new(&name);
+        let preview =
+            desktop_git::inspect_conflict_side(&f.repo, &f.change(), ConflictSide::Theirs).unwrap();
+        assert_eq!(preview.change.path, name);
+        assert_eq!(
+            preview.content,
+            ConflictSideContent::Text {
+                preview: "other\n".into(),
+                truncated: false
+            }
+        );
+    }
+}
+
+#[test]
+fn resolved_status_cannot_be_reused_as_an_unmerged_side_preview() {
+    let f = Fixture::new("file");
+    let selected = f.change();
+    f.write(b"resolved externally\n");
+    git(&f.repo, &["add", "--all"]);
+    let before = f.basis();
+    assert!(desktop_git::inspect_conflict_side(&f.repo, &selected, ConflictSide::Ours).is_err());
+    assert_eq!(f.basis(), before);
+    assert_eq!(std::fs::read(f.file()).unwrap(), b"resolved externally\n");
+}
+
+#[test]
+fn confirmed_regular_sides_replace_and_stage_only_the_reviewed_file() {
+    for (side, expected) in [
+        (ConflictSide::Ours, b"current\n".as_slice()),
+        (ConflictSide::Theirs, b"other\n"),
+    ] {
+        let f = Fixture::new("file");
+        std::fs::write(f.repo.join("untouched"), b"keep me").unwrap();
+        let before = f.basis();
+        let bytes = std::fs::read(f.file()).unwrap();
+        let review =
+            desktop_git::review_conflict_side_resolution(&f.repo, &f.change(), side).unwrap();
+        assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+        assert_eq!(f.basis(), before);
+        desktop_git::apply_conflict_side_resolution(&review).unwrap();
+        assert_eq!(std::fs::read(f.file()).unwrap(), expected);
+        assert_eq!(git(&f.repo, &["show", ":file"]), expected);
+        assert_eq!(f.basis().head, before.head);
+        assert_eq!(f.basis().merge_heads, before.merge_heads);
+        assert_eq!(std::fs::read(f.repo.join("untouched")).unwrap(), b"keep me");
+        let resolved = f.basis();
+        assert!(desktop_git::apply_conflict_side_resolution(&review).is_err());
+        assert_eq!(f.basis(), resolved);
+    }
+}
+
+#[test]
+fn confirmed_binary_and_add_add_choices_use_the_selected_index_blob() {
+    let f = Fixture::with_contents("file", b"a\0b", b"c\0d", b"e\0f");
+    let review =
+        desktop_git::review_conflict_side_resolution(&f.repo, &f.change(), ConflictSide::Theirs)
+            .unwrap();
+    desktop_git::apply_conflict_side_resolution(&review).unwrap();
+    assert_eq!(std::fs::read(f.file()).unwrap(), b"e\0f");
+    assert_eq!(git(&f.repo, &["show", ":file"]), b"e\0f");
+
+    use std::{io::Write, process::Stdio};
+    let f = Fixture::new("file");
+    let ours = String::from_utf8(git(&f.repo, &["rev-parse", ":2:file"])).unwrap();
+    let theirs = String::from_utf8(git(&f.repo, &["rev-parse", ":3:file"])).unwrap();
+    let records = format!(
+        "0 {}\tfile\n100644 {} 2\tfile\n100644 {} 3\tfile\n",
+        "0".repeat(40),
+        ours.trim(),
+        theirs.trim()
+    );
+    let mut update = Command::new("git")
+        .arg("-C")
+        .arg(&f.repo)
+        .args(["update-index", "--index-info"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    update
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(records.as_bytes())
+        .unwrap();
+    assert!(update.wait().unwrap().success());
+    assert_eq!((f.change().index, f.change().worktree), ('A', 'A'));
+    let review =
+        desktop_git::review_conflict_side_resolution(&f.repo, &f.change(), ConflictSide::Ours)
+            .unwrap();
+    desktop_git::apply_conflict_side_resolution(&review).unwrap();
+    assert_eq!(std::fs::read(f.file()).unwrap(), b"current\n");
+}
+
+#[test]
+fn confirmed_missing_sides_delete_and_stage_in_both_directions() {
+    for side in [ConflictSide::Ours, ConflictSide::Theirs] {
+        let f = Fixture::new("file");
+        git(&f.repo, &["merge", "--abort"]);
+        git(
+            &f.repo,
+            &[
+                "checkout",
+                if side == ConflictSide::Ours {
+                    "main"
+                } else {
+                    "side"
+                },
+            ],
+        );
+        std::fs::remove_file(f.file()).unwrap();
+        f.commit("delete side");
+        git(&f.repo, &["checkout", "main"]);
+        assert!(!Command::new("git")
+            .arg("-C")
+            .arg(&f.repo)
+            .args(["merge", "side"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let review =
+            desktop_git::review_conflict_side_resolution(&f.repo, &f.change(), side).unwrap();
+        assert!(review.preview.oid.is_none());
+        desktop_git::apply_conflict_side_resolution(&review).unwrap();
+        assert!(!f.file().exists());
+        assert!(git(&f.repo, &["ls-files", "--stage", "--", "file"]).is_empty());
+    }
+}
+
+#[test]
+fn edited_files_indices_attributes_and_settings_invalidate_side_choices() {
+    for mutation in ["file", "index", "attributes", "settings"] {
+        let f = Fixture::new("file");
+        let review = desktop_git::review_conflict_side_resolution(
+            &f.repo,
+            &f.change(),
+            ConflictSide::Theirs,
+        )
+        .unwrap();
+        match mutation {
+            "file" => f.write(b"user edited result\n"),
+            "index" => {
+                std::fs::write(f.repo.join("extra"), b"staged separately").unwrap();
+                git(&f.repo, &["add", "--", "extra"]);
+            }
+            "attributes" => {
+                std::fs::write(f.repo.join(".git/info/attributes"), b"file text\n").unwrap()
+            }
+            "settings" => {
+                git(&f.repo, &["config", "core.safecrlf", "true"]);
+            }
+            _ => unreachable!(),
+        }
+        let before = f.basis();
+        let bytes = std::fs::read(f.file()).unwrap();
+        assert!(desktop_git::apply_conflict_side_resolution(&review).is_err());
+        assert_eq!(f.basis(), before);
+        assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn external_resolutions_and_conversion_policies_are_not_overwritten() {
+    let f = Fixture::new("file");
+    f.write(b"resolved externally\n");
+    assert!(desktop_git::review_conflict_side_resolution(
+        &f.repo,
+        &f.change(),
+        ConflictSide::Theirs
+    )
+    .is_err());
+    assert_eq!(std::fs::read(f.file()).unwrap(), b"resolved externally\n");
+    let f = Fixture::new("file");
+    git(&f.repo, &["config", "core.autocrlf", "true"]);
+    assert!(
+        desktop_git::review_conflict_side_resolution(&f.repo, &f.change(), ConflictSide::Ours)
+            .is_err()
+    );
+    let f = Fixture::new("file");
+    std::fs::write(
+        f.repo.join(".git/info/attributes"),
+        b"file filter=must-not-run\n",
+    )
+    .unwrap();
+    git(
+        &f.repo,
+        &[
+            "config",
+            "filter.must-not-run.smudge",
+            "nonexistent-filter-helper",
+        ],
+    );
+    assert!(
+        desktop_git::review_conflict_side_resolution(&f.repo, &f.change(), ConflictSide::Ours)
+            .is_err()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn checkout_then_staging_failure_keeps_data_for_manual_recovery() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new("file");
+    git(&f.repo, &["config", "core.hooksPath", ".git/hooks"]);
+    let hook = f.repo.join(".git/hooks/post-checkout");
+    std::fs::write(&hook, b"#!/bin/sh\n: > .git/index.lock\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let review =
+        desktop_git::review_conflict_side_resolution(&f.repo, &f.change(), ConflictSide::Theirs)
+            .unwrap();
+    assert!(desktop_git::apply_conflict_side_resolution(&review).is_err());
+    assert_eq!(std::fs::read(f.file()).unwrap(), b"other\n");
+    assert!(f.change().is_conflicted());
+    std::fs::remove_file(f.repo.join(".git/index.lock")).unwrap();
+    git(&f.repo, &["config", "core.hooksPath", "/dev/null"]);
+    let reviewed = desktop_git::inspect_conflict(&f.repo, &f.change()).unwrap();
+    desktop_git::resolve_conflict(&reviewed).unwrap();
+    assert_eq!(git(&f.repo, &["show", ":file"]), b"other\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn confirmed_choice_keeps_literal_non_utf8_paths_and_executable_mode() {
+    use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
+    for name in [
+        PathBuf::from(":(glob)*\n\tfile"),
+        PathBuf::from(std::ffi::OsStr::from_bytes(b"side-\xff")),
+    ] {
+        let f = Fixture::new(&name);
+        let review = desktop_git::review_conflict_side_resolution(
+            &f.repo,
+            &f.change(),
+            ConflictSide::Theirs,
+        )
+        .unwrap();
+        let before = f.basis();
+        std::fs::set_permissions(f.file(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(desktop_git::apply_conflict_side_resolution(&review).is_err());
+        assert_eq!(f.basis(), before);
+        std::fs::set_permissions(f.file(), std::fs::Permissions::from_mode(0o644)).unwrap();
+        let review = desktop_git::review_conflict_side_resolution(
+            &f.repo,
+            &f.change(),
+            ConflictSide::Theirs,
+        )
+        .unwrap();
+        desktop_git::apply_conflict_side_resolution(&review).unwrap();
+        assert_eq!(std::fs::read(f.file()).unwrap(), b"other\n");
+    }
+}
+
+#[test]
+fn multiple_confirmed_choices_require_fresh_reviews_and_commit_with_both_merge_parents() {
+    let f = Fixture::new("file");
+    git(&f.repo, &["merge", "--abort"]);
+    git(&f.repo, &["checkout", "side"]);
+    std::fs::write(f.repo.join("second"), b"other added file\n").unwrap();
+    f.commit("side adds second");
+    git(&f.repo, &["checkout", "main"]);
+    std::fs::write(f.repo.join("second"), b"current added file\n").unwrap();
+    f.commit("main adds second");
+    let parents = [
+        git(&f.repo, &["rev-parse", "HEAD"]),
+        git(&f.repo, &["rev-parse", "side"]),
+    ];
+    assert!(!Command::new("git")
+        .arg("-C")
+        .arg(&f.repo)
+        .args(["merge", "side"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let state = desktop_git::snapshot(&f.repo).unwrap();
+    let second = state
+        .changes
+        .iter()
+        .find(|c| c.path == Path::new("second"))
+        .unwrap();
+    assert_eq!((second.index, second.worktree), ('A', 'A'));
+    let old_second =
+        desktop_git::review_conflict_side_resolution(&f.repo, second, ConflictSide::Theirs)
+            .unwrap();
+    let first =
+        desktop_git::review_conflict_side_resolution(&f.repo, &f.change(), ConflictSide::Ours)
+            .unwrap();
+    std::fs::write(f.repo.join("untracked-note"), b"preserve untracked").unwrap();
+    desktop_git::apply_conflict_side_resolution(&first).unwrap();
+    let after_first = f.basis();
+    let second_bytes = std::fs::read(f.repo.join("second")).unwrap();
+    assert!(desktop_git::apply_conflict_side_resolution(&old_second).is_err());
+    assert_eq!(f.basis(), after_first);
+    assert_eq!(std::fs::read(f.repo.join("second")).unwrap(), second_bytes);
+    let second_review =
+        desktop_git::review_conflict_side_resolution(&f.repo, second, ConflictSide::Theirs)
+            .unwrap();
+    desktop_git::apply_conflict_side_resolution(&second_review).unwrap();
+    let resolved = desktop_git::snapshot(&f.repo).unwrap();
+    assert!(!resolved.changes.iter().any(FileChange::is_conflicted));
+    desktop_git::commit(&f.repo, "Merge chosen sides", &resolved.commit_basis).unwrap();
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD^1"]), parents[0]);
+    assert_eq!(git(&f.repo, &["rev-parse", "HEAD^2"]), parents[1]);
+    assert_eq!(git(&f.repo, &["show", "HEAD:file"]), b"current\n");
+    assert_eq!(
+        git(&f.repo, &["show", "HEAD:second"]),
+        b"other added file\n"
+    );
+    assert_eq!(
+        std::fs::read(f.repo.join("untracked-note")).unwrap(),
+        b"preserve untracked"
+    );
+    assert_eq!(
+        git(&f.repo, &["status", "--porcelain=v1"]),
+        b"?? untracked-note\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn checkout_hook_failures_and_changed_policy_report_partial_state_without_staging() {
+    use std::os::unix::fs::PermissionsExt;
+    for body in [
+        "git config core.autocrlf true\n",
+        "exit 7\n",
+        "printf 'hook edited result\n' > file\n",
+    ] {
+        let f = Fixture::new("file");
+        git(&f.repo, &["config", "core.hooksPath", ".git/hooks"]);
+        let hook = f.repo.join(".git/hooks/post-checkout");
+        std::fs::write(&hook, format!("#!/bin/sh\n{body}")).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let review = desktop_git::review_conflict_side_resolution(
+            &f.repo,
+            &f.change(),
+            ConflictSide::Theirs,
+        )
+        .unwrap();
+        let before = f.basis();
+        let error = desktop_git::apply_conflict_side_resolution(&review).unwrap_err();
+        assert!(
+            error.to_string().contains("file/index may have changed"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("refresh and inspect"), "{error}");
+        assert_eq!(f.basis(), before);
+        assert!(f.change().is_conflicted());
+        assert_eq!(
+            std::fs::read(f.file()).unwrap(),
+            if body.starts_with("printf") {
+                b"hook edited result\n".as_slice()
+            } else {
+                b"other\n".as_slice()
+            }
+        );
+    }
+}
+
+#[test]
+fn unsupported_unmerged_statuses_cannot_turn_a_missing_side_into_a_deletion() {
+    use std::io::Write;
+    use std::process::Stdio;
+    for (stage, expected) in [(1, ('D', 'D')), (2, ('A', 'U')), (3, ('U', 'A'))] {
+        let f = Fixture::new("file");
+        let oid =
+            String::from_utf8(git(&f.repo, &["rev-parse", &format!(":{stage}:file")])).unwrap();
+        let records = format!(
+            "0 {}\tfile\n100644 {} {stage}\tfile\n",
+            "0".repeat(40),
+            oid.trim()
+        );
+        let mut child = Command::new("git")
+            .arg("-C")
+            .arg(&f.repo)
+            .args(["update-index", "--index-info"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(records.as_bytes())
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        let change = f.change();
+        assert_eq!((change.index, change.worktree), expected);
+        let before = f.basis();
+        let bytes = std::fs::read(f.file()).unwrap();
+        for side in [ConflictSide::Ours, ConflictSide::Theirs] {
+            desktop_git::inspect_conflict_side(&f.repo, &change, side).unwrap();
+            let error =
+                desktop_git::review_conflict_side_resolution(&f.repo, &change, side).unwrap_err();
+            assert!(error.to_string().contains("does not authorize deletion"));
+            assert_eq!(f.basis(), before);
+            assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+        }
+    }
 }

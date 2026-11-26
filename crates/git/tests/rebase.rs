@@ -1,3 +1,6 @@
+//! Git integration coverage for rebase.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, LocalBranch, RebaseKind, RebasePreview};
 use std::{
     path::{Path, PathBuf},
@@ -37,6 +40,8 @@ impl Fixture {
             ("user.email", "test@example.invalid"),
             ("commit.gpgsign", "false"),
             ("core.hooksPath", "/dev/null"),
+            ("core.autocrlf", "false"),
+            ("core.attributesFile", "/dev/null"),
         ] {
             git(&repo, &["config", key, value]);
         }
@@ -412,5 +417,331 @@ fn ignored_file_created_while_paused_blocks_continue_until_moved_aside() {
     assert_eq!(
         std::fs::read(f.root.join("kept-future")).unwrap(),
         b"new ignored work"
+    );
+}
+
+#[test]
+fn replay_limit_rejects_incomplete_plans_and_accepts_the_exact_boundary() {
+    let f = Fixture::new();
+    let base = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD"])).unwrap();
+    let tree = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD^{tree}"])).unwrap();
+    let target = String::from_utf8(git(
+        &f.repo,
+        &[
+            "commit-tree",
+            tree.trim(),
+            "-p",
+            base.trim(),
+            "-m",
+            "target",
+        ],
+    ))
+    .unwrap();
+    git(
+        &f.repo,
+        &["update-ref", "refs/heads/upstream", target.trim()],
+    );
+    let mut tip = base.trim().to_owned();
+    let mut accepted_tip = String::new();
+    for index in 0..1001 {
+        tip = String::from_utf8(git(
+            &f.repo,
+            &[
+                "commit-tree",
+                tree.trim(),
+                "-p",
+                &tip,
+                "-m",
+                &format!("source {index}"),
+            ],
+        ))
+        .unwrap()
+        .trim()
+        .to_owned();
+        if index == 999 {
+            accepted_tip = tip.clone();
+        }
+    }
+    git(&f.repo, &["update-ref", "HEAD", &tip]);
+    let before = f.basis();
+    let refs = git(&f.repo, &["show-ref"]);
+    assert_eq!(
+        desktop_git::preview_rebase(&f.repo, &f.target(), &before)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(git(&f.repo, &["show-ref"]), refs);
+    assert!(!f.repo.join(".git/rebase-merge").exists());
+    git(&f.repo, &["update-ref", "HEAD", &accepted_tip]);
+    let preview = desktop_git::preview_rebase(&f.repo, &f.target(), &f.basis()).unwrap();
+    assert_eq!(preview.kind, RebaseKind::Replay);
+    assert_eq!(preview.commits.len(), 1000);
+    assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), b"base\n");
+}
+
+#[test]
+fn oversized_rebase_checkout_review_is_rejected_before_refs_or_files_change() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let f = Fixture::new();
+    let blob = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD:base"])).unwrap();
+    let mut input = format!("100644 blob {}\tbase\0", blob.trim()).into_bytes();
+    for index in 0..10_001 {
+        input.extend_from_slice(
+            format!("100644 blob {}\tvirtual-{index:05}\0", blob.trim()).as_bytes(),
+        );
+    }
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(&f.repo)
+        .args(["mktree", "-z"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(&input).unwrap();
+    let result = child.wait_with_output().unwrap();
+    assert!(result.status.success());
+    let tree = String::from_utf8(result.stdout).unwrap();
+    let commit = String::from_utf8(git(
+        &f.repo,
+        &[
+            "commit-tree",
+            tree.trim(),
+            "-p",
+            "HEAD",
+            "-m",
+            "large target",
+        ],
+    ))
+    .unwrap();
+    git(
+        &f.repo,
+        &["update-ref", "refs/heads/upstream", commit.trim()],
+    );
+    let before = f.basis();
+    let refs = git(&f.repo, &["show-ref"]);
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    let preview = desktop_git::preview_rebase(&f.repo, &f.target(), &before).unwrap();
+    assert_eq!(preview.kind, RebaseKind::FastForward);
+    assert_eq!(
+        desktop_git::execute_rebase(&preview).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(git(&f.repo, &["show-ref"]), refs);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert!(!f.repo.join("virtual-00000").exists());
+    assert!(!f.repo.join(".git/rebase-merge").exists());
+}
+
+#[test]
+fn combined_rebase_path_budget_rejects_many_individually_small_reads() {
+    use std::io::Write;
+    use std::process::Stdio;
+    fn tree(repo: &Path, bytes: &[u8]) -> String {
+        let mut child = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["mktree", "-z"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(bytes).unwrap();
+        let result = child.wait_with_output().unwrap();
+        assert!(result.status.success());
+        String::from_utf8(result.stdout).unwrap().trim().to_owned()
+    }
+    fn long_tree(repo: &Path, blob: &str, count: usize) -> String {
+        let mut bytes = Vec::new();
+        for index in 0..count {
+            bytes.extend_from_slice(format!("100644 blob {blob}\tfile-{index:05}\0").as_bytes());
+        }
+        let mut oid = tree(repo, &bytes);
+        for _ in 0..10 {
+            oid = tree(
+                repo,
+                format!("040000 tree {oid}\t{}\0", "p".repeat(100)).as_bytes(),
+            );
+        }
+        tree(
+            repo,
+            format!("100644 blob {blob}\tbase\0040000 tree {oid}\tvirtual\0").as_bytes(),
+        )
+    }
+    let f = Fixture::new();
+    let blob = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD:base"])).unwrap();
+    let base = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD"])).unwrap();
+    let base_tree = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD^{tree}"])).unwrap();
+    let small_tree = long_tree(&f.repo, blob.trim(), 1000);
+    let large_tree = long_tree(&f.repo, blob.trim(), 3000);
+    let target = String::from_utf8(git(
+        &f.repo,
+        &[
+            "commit-tree",
+            &large_tree,
+            "-p",
+            base.trim(),
+            "-m",
+            "large target",
+        ],
+    ))
+    .unwrap();
+    git(
+        &f.repo,
+        &["update-ref", "refs/heads/upstream", target.trim()],
+    );
+    let mut tip = base.trim().to_owned();
+    for index in 0..6 {
+        let selected_tree = if index % 2 == 0 {
+            &small_tree
+        } else {
+            base_tree.trim()
+        };
+        tip = String::from_utf8(git(
+            &f.repo,
+            &[
+                "commit-tree",
+                selected_tree,
+                "-p",
+                &tip,
+                "-m",
+                &format!("step {index}"),
+            ],
+        ))
+        .unwrap()
+        .trim()
+        .to_owned();
+    }
+    git(&f.repo, &["update-ref", "HEAD", &tip]);
+    let before = f.basis();
+    let refs = git(&f.repo, &["show-ref"]);
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    let preview = desktop_git::preview_rebase(&f.repo, &f.target(), &before).unwrap();
+    assert_eq!(preview.commits.len(), 6);
+    // Each stream fits 4 MiB and the 9,000 records fit the count budget;
+    // their combined raw paths exceed 8 MiB before any checkout is allowed.
+    assert_eq!(
+        desktop_git::execute_rebase(&preview).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(git(&f.repo, &["show-ref"]), refs);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert!(!f.repo.join("virtual").exists());
+    assert!(!f.repo.join(".git/rebase-merge").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn noisy_driver_diagnostics_stay_bounded_while_rebase_pauses_and_aborts() {
+    let f = Fixture::new();
+    f.conflict();
+    std::fs::write(f.repo.join(".git/info/attributes"), b"base merge=noisy\n").unwrap();
+    git(&f.repo, &["config", "merge.noisy.driver", "head -c 100000 /dev/zero; head -c 100000 /dev/zero >&2; printf 'driver diagnostic tail' >&2; exit 1"]);
+    let before = f.basis();
+    let output = desktop_git::execute_rebase(&f.preview()).unwrap();
+    assert!(output.starts_with("Rebase paused."));
+    assert!(output.contains("earlier output truncated"));
+    assert!(output.contains("driver diagnostic tail"));
+    assert!(output.len() < 2 * 64 * 1024 + 300);
+    let paused = f.basis();
+    assert!(paused.rebase.is_some());
+    assert!(desktop_git::snapshot(&f.repo)
+        .unwrap()
+        .changes
+        .iter()
+        .any(|change| change.is_conflicted()));
+    assert_eq!(
+        desktop_git::abort_rebase(&f.repo, &paused).unwrap(),
+        "Rebase aborted"
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), b"local side\n");
+}
+
+#[test]
+fn confirmed_rebase_sides_keep_git_meaning_and_continue_on_the_original_branch() {
+    for (side, contents) in [
+        (
+            desktop_core::ConflictSide::Ours,
+            b"upstream side\n".as_slice(),
+        ),
+        (
+            desktop_core::ConflictSide::Theirs,
+            b"local side\n".as_slice(),
+        ),
+    ] {
+        let f = Fixture::new();
+        f.start_conflict();
+        f.write("untracked-note", b"keep this note");
+        let before = f.basis();
+        let state = desktop_git::snapshot(&f.repo).unwrap();
+        let change = state.changes.iter().find(|c| c.is_conflicted()).unwrap();
+        let review = desktop_git::review_conflict_side_resolution(&f.repo, change, side).unwrap();
+        desktop_git::apply_conflict_side_resolution(&review).unwrap();
+        let staged = f.basis();
+        assert_eq!(staged.head, before.head);
+        assert_eq!(staged.rebase, before.rebase);
+        assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), contents);
+        assert_eq!(git(&f.repo, &["show", ":base"]), contents);
+        desktop_git::continue_rebase(&f.repo, &staged).unwrap();
+        assert!(f.basis().rebase.is_none());
+        assert_eq!(
+            f.basis().branch.as_deref(),
+            Some(std::ffi::OsStr::new("refs/heads/main"))
+        );
+        assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), contents);
+        assert_eq!(
+            std::fs::read(f.repo.join("untracked-note")).unwrap(),
+            b"keep this note"
+        );
+        if side == desktop_core::ConflictSide::Ours {
+            // Choosing rebased-onto content removes the entire replayed patch.
+            assert_eq!(
+                git(&f.repo, &["rev-parse", "HEAD"]),
+                git(&f.repo, &["rev-parse", "upstream"])
+            );
+        } else {
+            assert_eq!(
+                git(&f.repo, &["log", "-1", "--format=%s"]),
+                b"local conflict commit\n"
+            );
+            assert_eq!(
+                git(&f.repo, &["rev-parse", "HEAD~1"]),
+                git(&f.repo, &["rev-parse", "upstream"])
+            );
+        }
+    }
+}
+
+#[test]
+fn abort_after_a_confirmed_rebase_choice_restores_original_history_and_invalidates_review() {
+    let f = Fixture::new();
+    f.conflict();
+    let original = f.basis();
+    desktop_git::execute_rebase(&f.preview()).unwrap();
+    let state = desktop_git::snapshot(&f.repo).unwrap();
+    let change = state.changes.iter().find(|c| c.is_conflicted()).unwrap();
+    let review = desktop_git::review_conflict_side_resolution(
+        &f.repo,
+        change,
+        desktop_core::ConflictSide::Ours,
+    )
+    .unwrap();
+    desktop_git::apply_conflict_side_resolution(&review).unwrap();
+    f.write("untracked-note", b"keep this note");
+    desktop_git::abort_rebase(&f.repo, &f.basis()).unwrap();
+    assert_eq!(f.basis(), original);
+    assert_eq!(std::fs::read(f.repo.join("base")).unwrap(), b"local side\n");
+    assert!(desktop_git::apply_conflict_side_resolution(&review).is_err());
+    assert_eq!(f.basis(), original);
+    assert_eq!(
+        std::fs::read(f.repo.join("untracked-note")).unwrap(),
+        b"keep this note"
     );
 }

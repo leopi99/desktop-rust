@@ -1,5 +1,5 @@
 //! Local branch merge previews and explicit merge/abort operations.
-use super::{commit_basis, file_path, git_command, read_bytes, run_write, snapshot, WRITE_LOCK};
+use super::{commit_basis, file_path, git_command, run_write, snapshot, WRITE_LOCK};
 use desktop_core::{CommitBasis, LocalBranch, MergeKind, MergePreview};
 use std::{
     ffi::OsString,
@@ -8,7 +8,7 @@ use std::{
 };
 
 pub(super) fn metadata_path(root: &Path, name: &str) -> io::Result<PathBuf> {
-    let bytes = read_bytes(root, &["rev-parse", "--git-path", name])?;
+    let bytes = super::read_output::complete(root, &["rev-parse", "--git-path", name], 64 * 1024)?;
     let path = file_path(bytes.strip_suffix(b"\n").unwrap_or(&bytes))?;
     Ok(if path.is_absolute() {
         path
@@ -63,16 +63,19 @@ pub(super) fn ensure_idle(root: &Path) -> io::Result<()> {
 }
 
 pub(super) fn ancestor(root: &Path, first: &str, second: &str) -> io::Result<bool> {
-    let output = git_command(root)
-        .args(["merge-base", "--is-ancestor", first, second])
-        .output()?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(1) => Ok(false),
-        _ => Err(io::Error::other(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        )),
-    }
+    Ok(
+        super::read_output::optional(root, &["merge-base", "--is-ancestor", first, second], 0)?
+            .is_some(),
+    )
+}
+
+pub(super) fn require_common_ancestor(root: &Path, first: &str, second: &str) -> io::Result<()> {
+    let bytes =
+        super::read_output::optional(root, &["merge-base", "--", first, second], 64 * 1024)?
+            .ok_or_else(|| io::Error::other("Branches have unrelated histories"))?;
+    let oid = std::str::from_utf8(&bytes)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    super::history::validate_oid(oid.strip_suffix('\n').unwrap_or(oid))
 }
 
 fn build_preview(
@@ -106,7 +109,11 @@ fn build_preview(
             "Target branch changed or was removed; refresh the merge preview",
         ));
     }
-    let head = expected.head.as_ref().expect("verified HEAD").trim();
+    let head = expected
+        .head
+        .as_deref()
+        .ok_or_else(|| io::Error::other("A committed HEAD is required"))?
+        .trim();
     let mut preview = MergePreview {
         repository: state.repository,
         target: target.clone(),
@@ -122,28 +129,18 @@ fn build_preview(
         preview.kind = MergeKind::FastForward;
         return Ok(preview);
     }
-    let common = git_command(&preview.repository.path)
-        .args(["merge-base", "--", head, &target.oid])
-        .output()?;
-    if common.status.code() == Some(1) {
-        return Err(io::Error::other("Branches have unrelated histories"));
-    }
-    if !common.status.success() {
-        return Err(io::Error::other(
-            String::from_utf8_lossy(&common.stderr).into_owned(),
-        ));
-    }
-    let output = git_command(&preview.repository.path)
-        .args([
-            "merge-tree",
-            "--write-tree",
-            "--name-only",
-            "--no-messages",
-            "-z",
-            head,
-            &target.oid,
-        ])
-        .output()?;
+    require_common_ancestor(&preview.repository.path, head, &target.oid)?;
+    let mut command = git_command(&preview.repository.path);
+    command.args([
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "--no-messages",
+        "-z",
+        head,
+        &target.oid,
+    ]);
+    let output = super::process::complete_write_output(command, 4 * 1024 * 1024, 64 * 1024)?;
     if !matches!(output.status.code(), Some(0 | 1)) {
         return Err(io::Error::other(
             String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -178,6 +175,10 @@ fn build_preview(
 
 /// Predict mergeability without changing HEAD, index or working-tree files.
 /// Divergent previews write temporary Git objects and can invoke configured merge drivers.
+///
+/// # Errors
+///
+/// Returns an error for stale/dirty/unsupported source state, changed targets, unrelated histories or Git failure.
 pub fn preview_merge(
     path: &Path,
     target: &LocalBranch,
@@ -191,6 +192,10 @@ pub fn preview_merge(
 
 /// Merge exactly the reviewed commit. Fast-forwards finish immediately; divergent
 /// merges stop before commit so the user can review or resolve the resulting index.
+///
+/// # Errors
+///
+/// Returns an error if the preview is no longer valid, checkout collisions are found or Git rejects execution.
 pub fn execute_merge(preview: &MergePreview) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -205,9 +210,15 @@ pub fn execute_merge(preview: &MergePreview) -> io::Result<String> {
     }
     // branch.<name>.mergeOptions can add strategies (not just defaults), so clear
     // them before supplying the exact, previewed merge policy.
-    let branch = Path::new(preview.basis.branch.as_ref().expect("verified branch"))
-        .strip_prefix("refs/heads")
-        .map_err(|_| io::Error::other("Invalid local branch ref"))?;
+    let branch = Path::new(
+        preview
+            .basis
+            .branch
+            .as_ref()
+            .ok_or_else(|| io::Error::other("A local branch is required"))?,
+    )
+    .strip_prefix("refs/heads")
+    .map_err(|_| io::Error::other("Invalid local branch ref"))?;
     let mut options = OsString::from("branch.");
     options.push(branch.as_os_str());
     options.push(".mergeOptions=");
@@ -250,6 +261,10 @@ pub fn execute_merge(preview: &MergePreview) -> io::Result<String> {
 
 /// Abort an in-progress merge after explicit user confirmation. Git discards merge
 /// results/resolution edits; no stash or unrelated untracked files are deleted.
+///
+/// # Errors
+///
+/// Returns an error for stale/non-merge state or Git rejection; abort can discard merge resolution edits.
 pub fn abort_merge(path: &Path, expected: &CommitBasis) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()

@@ -1,0 +1,95 @@
+{
+  "tested_revision": "2ea9a7665d400e0b5e39c70e0c8ac40710ebbacf",
+  "date": "2026-11-26",
+  "platform": "Linux",
+  "renderer": "tiny-skia",
+  "rust_tests": 408,
+  "ui_tests_included": 107,
+  "compiler_policy_tests": 10,
+  "upstream_tests": 32,
+  "rust_gate": "passed",
+  "npm_lint_fix": "passed",
+  "npm_lint": "passed",
+  "upstream_ledger": "valid",
+  "smoke": [
+    {
+      "size": "960x640",
+      "panels": [
+        "changes",
+        "history",
+        "branches",
+        "remotes",
+        "stash",
+        "repository",
+        "git",
+        "branch-delete-review"
+      ],
+      "diagnostic_cases": ["git-missing", "git-timeout", "git-noisy"],
+      "fixture_unchanged": true,
+      "note": "Rendered captures require human visual review; this is not an interaction or accessibility test."
+    },
+    {
+      "size": "1200x800",
+      "panels": [
+        "changes",
+        "history",
+        "branches",
+        "remotes",
+        "stash",
+        "repository",
+        "git",
+        "branch-delete-review"
+      ],
+      "diagnostic_cases": ["git-missing", "git-timeout", "git-noisy"],
+      "fixture_unchanged": true,
+      "note": "Rendered captures require human visual review; this is not an interaction or accessibility test."
+    }
+  ],
+  "extra_captures": [
+    {
+      "scenario": "changes",
+      "panel": "line-selection-review",
+      "size": "960x640",
+      "fixture_unchanged": true,
+      "image_sha256": "7fbbb3ae67908016dd961c09ed8f90794166e0feb4442b5d82c04a0ef1d8166e"
+    },
+    {
+      "scenario": "changes",
+      "panel": "line-selection-review",
+      "size": "1200x800",
+      "fixture_unchanged": true,
+      "image_sha256": "b3e37c3a182445f15641a56a92b9c046f337f7bdc78d8010976ae202d68e7f4f"
+    },
+    {
+      "scenario": "merge-conflict",
+      "panel": "conflict-ours-review",
+      "size": "960x640",
+      "fixture_unchanged": true,
+      "image_sha256": "cacfa706f19232e91fbf3854a89f7a5a39f598d0c71709d5668ec32268b6f0e2"
+    },
+    {
+      "scenario": "merge-conflict",
+      "panel": "conflict-ours-review",
+      "size": "1200x800",
+      "fixture_unchanged": true,
+      "image_sha256": "f51395e1491d9237f736b85530a65fb6dbf9a85f6ccb90410b1a1b23bd0c57d5"
+    }
+  ],
+  "fixture_checks": {
+    "existing_root_refused": true,
+    "dangling_symlink_refused": true,
+    "missing_git_does_not_reserve_root": true,
+    "global_config_ignored_and_unchanged": true,
+    "merge_and_rebase_abort_fixture_sanity": true,
+    "interactive_checks": "not-run"
+  },
+  "interactive_acceptance": "not-run",
+  "hosted_ci": "not claimed; owner reports quota exhausted until December",
+  "screenshots_sha256": {
+    "branches-960.png": "3a47008257e2152c3a8ec4e786b31a44752607884dac60ae006e8d723e108fd6",
+    "changes-960.png": "7e8696368945ed522c02d52c45ad3a528af1d74d125ee65e47bdf4bf2ca3ca4e",
+    "conflict-choice-960.png": "cacfa706f19232e91fbf3854a89f7a5a39f598d0c71709d5668ec32268b6f0e2",
+    "line-selection-960.png": "7fbbb3ae67908016dd961c09ed8f90794166e0feb4442b5d82c04a0ef1d8166e"
+  },
+  "binary_sha256": "7c93bb496e137b4bd30c975efbcad968969ecaaf6786895834b89d810829458d"
+}

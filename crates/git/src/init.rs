@@ -1,28 +1,80 @@
 //! Initialize a local project without reusing existing Git metadata.
-use super::{branches, read_bytes, run_write, WRITE_LOCK};
+use super::{branches, run_write, WRITE_LOCK};
 use std::{
     io,
     path::{Path, PathBuf},
 };
 
+fn entry_exists(path: &Path) -> io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 fn check_location(path: &Path) -> io::Result<()> {
-    // A malformed gitfile, a linked-worktree marker or a broken symlink must
-    // also prevent initialization, even if `rev-parse` cannot open it.
     for ancestor in path.ancestors() {
-        match std::fs::symlink_metadata(ancestor.join(".git")) {
-            Ok(_) => {
-                return Err(io::Error::other(
-                    "Destination is already inside a Git repository",
-                ))
+        if entry_exists(&ancestor.join(".git"))? {
+            return Err(io::Error::other(
+                "Destination is already inside Git metadata",
+            ));
+        }
+        // Conservatively protect bare/separate Git directories even with broken
+        // HEAD/refs or symlinked components. Never infer absence from Git failure.
+        if entry_exists(&ancestor.join("HEAD"))? && entry_exists(&ancestor.join("objects"))? {
+            for marker in ["refs", "reftable", "packed-refs"] {
+                if entry_exists(&ancestor.join(marker))? {
+                    return Err(io::Error::other(
+                        "Destination is inside a Git metadata layout",
+                    ));
+                }
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
         }
     }
-    if read_bytes(path, &["rev-parse", "--absolute-git-dir"]).is_ok() {
-        return Err(io::Error::other("Destination is already a Git repository"));
-    }
     Ok(())
+}
+
+fn configured_initial_branch() -> io::Result<String> {
+    let mut command = super::base_git_command();
+    command.args([
+        "--no-optional-locks",
+        "config",
+        "--global",
+        "--null",
+        "--get",
+        "init.defaultBranch",
+    ]);
+    let Some(mut bytes) = super::read_output::optional_command(command, 64 * 1024)? else {
+        return Ok(String::from("main"));
+    };
+    if bytes.pop() != Some(0) || bytes.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid initial-branch configuration record",
+        ));
+    }
+    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+/// Initialize using an explicit branch override or the global Git preference.
+/// With no override, read `init.defaultBranch`; fall back to `main` only if unset.
+/// Configured values are preserved for validation, including empty/invalid names.
+/// The lookup finishes before reserving any destination or Git metadata.
+///
+/// # Errors
+///
+/// Returns configuration/Git lookup errors (including oversized/invalid output
+/// and Unix read deadlines), or any validation/initialization error documented
+/// by [`init_repository`]. Global configuration is never written by this API.
+pub fn init_repository_with_default_branch(
+    destination: &Path,
+    branch: Option<&str>,
+) -> io::Result<PathBuf> {
+    match branch {
+        Some(branch) => init_repository(destination, branch),
+        None => init_repository(destination, &configured_initial_branch()?),
+    }
 }
 
 /// Initialize a non-bare repository on the explicit initial branch.
@@ -30,6 +82,10 @@ fn check_location(path: &Path) -> io::Result<()> {
 /// containing ordinary project files. Existing/nested repositories and symlinks
 /// are rejected. No project files are created, staged, committed or removed.
 /// An initialization failure may leave newly reserved metadata for inspection.
+///
+/// # Errors
+///
+/// Returns an error for invalid names/destinations, existing or nested Git metadata, filesystem failure or Git rejection.
 pub fn init_repository(destination: &Path, initial_branch: &str) -> io::Result<PathBuf> {
     let _guard = WRITE_LOCK
         .lock()

@@ -1,3 +1,6 @@
+//! Git integration coverage for stash.
+#![cfg(test)]
+
 use desktop_core::{CommitBasis, StashEntry};
 use std::{
     path::{Path, PathBuf},
@@ -263,4 +266,130 @@ fn stash_conflict_can_be_reviewed_resolved_and_committed_without_dropping_stash(
     desktop_git::commit(&f.repo, "Resolved saved changes", &f.basis()).unwrap();
     assert!(desktop_git::snapshot(&f.repo).unwrap().changes.is_empty());
     assert_eq!(f.entries(), vec![entry]);
+}
+
+#[test]
+fn oversized_stash_list_blocks_restore_and_preserves_saved_data_for_retry() {
+    let f = Fixture::new();
+    f.write("file", b"saved change\n");
+    f.save("fixture");
+    let entry = f.entries()[0].clone();
+    let before = f.basis();
+    let reflog_path = f.repo.join(".git/logs/refs/stash");
+    let original = std::fs::read(&reflog_path).unwrap();
+    let separator = original.iter().position(|byte| *byte == b'\t').unwrap();
+    let mut oversized = original[..=separator].to_vec();
+    oversized.extend(std::iter::repeat_n(b's', 5 * 1024 * 1024));
+    oversized.push(b'\n');
+    std::fs::write(&reflog_path, &oversized).unwrap();
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    assert_eq!(
+        desktop_git::apply_stash(&f.repo, &entry, &before)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::snapshot(&f.repo).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(std::fs::read(&reflog_path).unwrap(), oversized);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert_eq!(std::fs::read(f.repo.join("file")).unwrap(), b"base\n");
+    std::fs::write(&reflog_path, original).unwrap();
+    desktop_git::apply_stash(&f.repo, &entry, &before).unwrap();
+    assert_eq!(
+        std::fs::read(f.repo.join("file")).unwrap(),
+        b"saved change\n"
+    );
+    assert_eq!(f.entries(), vec![entry]);
+}
+
+#[test]
+fn oversized_collision_review_refuses_restore_and_keeps_other_stashes_usable() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let f = Fixture::new();
+    f.write("file", b"saved change\n");
+    f.save("usable stash");
+    let usable = f.entries()[0].clone();
+    let blob = String::from_utf8(git(&f.repo, &["rev-parse", "HEAD:file"])).unwrap();
+    let index_parent =
+        String::from_utf8(git(&f.repo, &["rev-parse", &format!("{}^2", usable.oid)])).unwrap();
+    let mut tree_input = format!("100644 blob {}\tfile\0", blob.trim()).into_bytes();
+    for index in 0..10_001 {
+        tree_input.extend_from_slice(
+            format!("100644 blob {}\tvirtual-{index:05}\0", blob.trim()).as_bytes(),
+        );
+    }
+    let mut make_tree = Command::new("git")
+        .arg("-C")
+        .arg(&f.repo)
+        .args(["mktree", "-z"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    make_tree
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&tree_input)
+        .unwrap();
+    let result = make_tree.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let tree = String::from_utf8(result.stdout).unwrap();
+    let commit = String::from_utf8(git(
+        &f.repo,
+        &[
+            "commit-tree",
+            tree.trim(),
+            "-p",
+            "HEAD",
+            "-p",
+            index_parent.trim(),
+            "-m",
+            "oversized collision review",
+        ],
+    ))
+    .unwrap();
+    git(
+        &f.repo,
+        &[
+            "update-ref",
+            "-m",
+            "oversized collision review",
+            "refs/stash",
+            commit.trim(),
+        ],
+    );
+    let selected = f.entries()[0].clone();
+    let before = f.basis();
+    let index = std::fs::read(f.repo.join(".git/index")).unwrap();
+    let reflog = std::fs::read(f.repo.join(".git/logs/refs/stash")).unwrap();
+    assert_eq!(
+        desktop_git::apply_stash(&f.repo, &selected, &before)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.basis(), before);
+    assert_eq!(std::fs::read(f.repo.join(".git/index")).unwrap(), index);
+    assert_eq!(
+        std::fs::read(f.repo.join(".git/logs/refs/stash")).unwrap(),
+        reflog
+    );
+    assert!(!f.repo.join("virtual-00000").exists());
+    assert_eq!(std::fs::read(f.repo.join("file")).unwrap(), b"base\n");
+    desktop_git::apply_stash(&f.repo, &usable, &before).unwrap();
+    assert_eq!(
+        std::fs::read(f.repo.join("file")).unwrap(),
+        b"saved change\n"
+    );
+    assert_eq!(f.entries().len(), 2);
 }

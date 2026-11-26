@@ -1,13 +1,19 @@
 //! Explicit remote operations using existing Git transport credentials.
-use super::{
-    commit_basis, file_path, read_bytes, run_write, transfer, TransferControl, WRITE_LOCK,
-};
+use super::{commit_basis, file_path, run_write, transfer, TransferControl, WRITE_LOCK};
 use desktop_core::{CommitBasis, Remote, RemoteAction, RemoteUrlKind};
 use std::{
     ffi::{OsStr, OsString},
     io,
     path::{Path, PathBuf},
 };
+
+const REMOTE_LIMIT: usize = 64;
+const URL_LIMIT: usize = 64;
+const METADATA_LIMIT: usize = 64 * 1024;
+
+fn read_metadata<S: AsRef<OsStr>>(path: &Path, args: &[S]) -> io::Result<Vec<u8>> {
+    super::read_output::complete(path, args, METADATA_LIMIT)
+}
 
 fn lines(bytes: &[u8]) -> io::Result<Vec<OsString>> {
     bytes
@@ -19,11 +25,17 @@ fn lines(bytes: &[u8]) -> io::Result<Vec<OsString>> {
 
 pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
     let basis = commit_basis(path)?;
-    let names = lines(&read_bytes(path, &["remote"])?)?;
+    let names = lines(&read_metadata(path, &["remote"])?)?;
+    if names.len() > REMOTE_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Repository exceeds the 64-remote limit",
+        ));
+    }
     let mut upstream_remote = None;
     let mut upstream_ref = None;
     if let Some(branch) = &basis.branch {
-        let raw = read_bytes(
+        let raw = read_metadata(
             path,
             &[
                 OsStr::new("for-each-ref"),
@@ -45,7 +57,7 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
     names
         .into_iter()
         .map(|name| {
-            let fetch_urls = lines(&read_bytes(
+            let fetch_urls = lines(&read_metadata(
                 path,
                 &[
                     OsStr::new("remote"),
@@ -55,7 +67,7 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
                     &name,
                 ],
             )?)?;
-            let push_urls = lines(&read_bytes(
+            let push_urls = lines(&read_metadata(
                 path,
                 &[
                     OsStr::new("remote"),
@@ -66,6 +78,12 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
                     &name,
                 ],
             )?)?;
+            if fetch_urls.len() > URL_LIMIT || push_urls.len() > URL_LIMIT {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Remote endpoint exceeds the 64-URL limit",
+                ));
+            }
             let target_branch = if basis.head.is_none() {
                 None
             } else if let Some(upstream_remote) = &upstream_remote {
@@ -90,6 +108,10 @@ pub(super) fn list(path: &Path) -> io::Result<Vec<Remote>> {
 /// Fetch, fast-forward pull, or non-forced push to an explicitly selected remote.
 /// Push sends only HEAD to the tracked remote branch, or the same local branch
 /// name when unpublished, and establishes tracking after success.
+///
+/// # Errors
+///
+/// Returns an error for unsupported endpoints, stale repository state, cancellation, timeout or Git/transport failure.
 pub fn remote_operation(
     path: &Path,
     remote: &Remote,
@@ -100,6 +122,10 @@ pub fn remote_operation(
 }
 
 /// Execute a remote action with live diagnostics, cancellation and a deadline.
+///
+/// # Errors
+///
+/// Returns an error for unsupported endpoints, stale state, cancellation, timeout or Git/transport failure.
 pub fn remote_operation_with_control(
     path: &Path,
     remote: &Remote,
@@ -193,11 +219,19 @@ pub fn remote_operation_with_control(
 /// Clone into a newly reserved destination. Existing paths are never reused.
 /// A failed clone may leave partial files for manual inspection; no recursive
 /// cleanup is performed. Credentials come from Git helpers/SSH, not this API.
+///
+/// # Errors
+///
+/// Returns an error for invalid sources/destinations, cancellation, timeout or Git/transport failure; partial output may remain.
 pub fn clone_repository(source: &str, destination: &Path) -> io::Result<PathBuf> {
     clone_repository_with_control(source, destination, &TransferControl::default())
 }
 
 /// Clone with live diagnostics, cancellation and a deadline.
+///
+/// # Errors
+///
+/// Returns an error for invalid sources/destinations, cancellation, timeout or Git/transport failure; partial output may remain.
 pub fn clone_repository_with_control(
     source: &str,
     destination: &Path,
@@ -263,7 +297,22 @@ fn validate_source(source: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn validate_endpoint(url: &str) -> io::Result<()> {
+    validate_source(url)?;
+    if url.len() >= METADATA_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Remote URL exceeds the metadata limit",
+        ));
+    }
+    Ok(())
+}
+
 /// Add a named remote without fetching or changing branch tracking.
+///
+/// # Errors
+///
+/// Returns an error for invalid/duplicate names, unsupported URLs or Git/configuration failure.
 pub fn add_remote(path: &Path, name: &str, url: &str) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -274,16 +323,26 @@ pub fn add_remote(path: &Path, name: &str, url: &str) -> io::Result<String> {
             "Invalid remote name",
         ));
     }
-    read_bytes(
+    read_metadata(
         path,
         &["check-ref-format", &format!("refs/remotes/{name}/probe")],
     )?;
-    validate_source(url)?;
-    if list(path)?
-        .iter()
-        .any(|remote| remote.name == OsStr::new(name))
-    {
+    validate_endpoint(url)?;
+    let remotes = list(path)?;
+    if remotes.iter().any(|remote| remote.name == OsStr::new(name)) {
         return Err(io::Error::other("Remote already exists"));
+    }
+    let names_size: usize = remotes
+        .iter()
+        .map(|remote| remote.name.as_encoded_bytes().len() + 1)
+        .sum();
+    if remotes.len() == REMOTE_LIMIT
+        || names_size.saturating_add(name.len()).saturating_add(1) > METADATA_LIMIT
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Adding this remote would exceed the remote metadata limits",
+        ));
     }
     run_write(path, &["remote", "add", "--", name, url], None)?;
     Ok(format!("Added remote {name}"))
@@ -300,6 +359,10 @@ fn validate_remote(path: &Path, selected: &Remote) -> io::Result<()> {
 
 /// Replace the sole URL for one endpoint, retaining the other endpoint's config.
 /// Multi-URL endpoints are rejected rather than silently replacing only one URL.
+///
+/// # Errors
+///
+/// Returns an error for a stale remote, invalid/unsupported endpoints or Git/configuration failure.
 pub fn set_remote_url(
     path: &Path,
     selected: &Remote,
@@ -309,7 +372,7 @@ pub fn set_remote_url(
     let _guard = WRITE_LOCK
         .lock()
         .map_err(|_| io::Error::other("Write lock poisoned"))?;
-    validate_source(url)?;
+    validate_endpoint(url)?;
     validate_remote(path, selected)?;
     let urls = match kind {
         RemoteUrlKind::Fetch => &selected.fetch_urls,
@@ -334,6 +397,10 @@ pub fn set_remote_url(
 
 /// Remove local remote configuration and its remote-tracking refs using Git.
 /// Local branches, working-tree files and the server repository are not deleted.
+///
+/// # Errors
+///
+/// Returns an error if the selected remote changed or Git/configuration removal fails.
 pub fn remove_remote(path: &Path, selected: &Remote) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()

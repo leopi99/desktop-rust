@@ -1,6 +1,6 @@
 use super::{clip::clip, Desktop, Message, Panel};
-use desktop_core::{FileChange, MergeKind, RebaseKind, RemoteAction};
-use iced::widget::{button, column, pick_list, row, scrollable, text, text_input};
+use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
+use iced::widget::{button, checkbox, column, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length};
 
 impl Desktop {
@@ -35,9 +35,53 @@ impl Desktop {
                     if !self.loading {
                         review = review.on_press(Message::ReviewConflict(change.clone()));
                     }
-                    files = files.push(review);
+                    let mut ours = button("Preview ours");
+                    let mut theirs = button("Preview theirs");
+                    if !self.loading {
+                        ours = ours.on_press(Message::ReviewConflictSide(
+                            change.clone(),
+                            ConflictSide::Ours,
+                        ));
+                        theirs = theirs.on_press(Message::ReviewConflictSide(
+                            change.clone(),
+                            ConflictSide::Theirs,
+                        ));
+                    }
+                    let mut choose_ours = button("Choose ours…");
+                    let mut choose_theirs = button("Choose theirs…");
+                    if !self.loading {
+                        choose_ours = choose_ours.on_press(Message::RequestConflictSideResolution(
+                            change.clone(),
+                            ConflictSide::Ours,
+                        ));
+                        choose_theirs =
+                            choose_theirs.on_press(Message::RequestConflictSideResolution(
+                                change.clone(),
+                                ConflictSide::Theirs,
+                            ));
+                    }
+                    files = files
+                        .push(review)
+                        .push(ours)
+                        .push(theirs)
+                        .push(choose_ours)
+                        .push(choose_theirs);
                 } else {
                     files = files.push(row![stage, unstage].spacing(6));
+                    if change.can_review_unstaged_hunks() {
+                        let mut hunks = button("Review unstaged hunks");
+                        if !self.loading {
+                            hunks = hunks.on_press(Message::ReviewHunks(change.clone()));
+                        }
+                        files = files.push(hunks);
+                    }
+                }
+                if change.can_review_staged_hunks() {
+                    let mut hunks = button("Review staged hunks");
+                    if !self.loading {
+                        hunks = hunks.on_press(Message::ReviewStagedHunks(change.clone()));
+                    }
+                    files = files.push(hunks);
                 }
             }
         }
@@ -49,6 +93,28 @@ impl Desktop {
             files = files
                 .push(text(format!("Reviewed: {}", review.change.path.display())))
                 .push(resolve);
+        }
+        let mut side_confirmation = column![].spacing(6);
+        if let Some(review) = &self.side_resolution_review {
+            let action = if review.preview.oid.is_none() {
+                "Delete working file and stage"
+            } else {
+                "Replace working file and stage"
+            };
+            let mut apply = button("Apply choice").style(button::danger);
+            let mut cancel = button("Cancel choice");
+            if !self.loading {
+                apply = apply.on_press(Message::ApplyConflictSideResolution);
+                cancel = cancel.on_press(Message::CancelConflictSideResolution);
+            }
+            files = files.push(text(format!(
+                "Reviewed {:?}: {}",
+                review.preview.side,
+                review.preview.change.path.display()
+            )));
+            side_confirmation = side_confirmation
+                .push(text(action))
+                .push(row![apply, cancel].spacing(8));
         }
         let mut open = button(if self.loading {
             "Loading…"
@@ -160,6 +226,20 @@ impl Desktop {
             {
                 rename = rename.on_press(Message::RenameCurrentBranch);
             }
+            let mut rename_selected = button("Rename selected branch");
+            if !self.loading
+                && !merging
+                && !rebasing
+                && !self.rename_branch.is_empty()
+                && snapshot.commit_basis.branch.is_some()
+                && snapshot.commit_basis.head.is_some()
+                && self
+                    .target_branch
+                    .as_ref()
+                    .is_some_and(|branch| !branch.is_current && snapshot.branches.contains(branch))
+            {
+                rename_selected = rename_selected.on_press(Message::RenameSelectedBranch);
+            }
             let mut delete = button("Delete selected branch…").style(button::danger);
             if !self.loading
                 && !merging
@@ -188,21 +268,25 @@ impl Desktop {
                 delete,
                 row![preview, merge].spacing(8),
                 row![preview_rebase, rebase].spacing(8),
-                row![
+                column![
                     text_input("New branch name", &self.new_branch)
                         .on_input(Message::BranchNameChanged),
                     create
                 ]
-                .spacing(8),
-                row![
-                    text_input("New name for the current branch", &self.rename_branch)
+                .spacing(6)
+                .width(Length::Fill),
+                column![
+                    text_input("New local branch name", &self.rename_branch)
                         .on_input(Message::RenameBranchNameChanged),
-                    rename
+                    rename,
+                    rename_selected
                 ]
-                .spacing(8),
+                .spacing(6)
+                .width(Length::Fill),
                 text("Renaming is local. The remote branch keeps its existing name.").size(14),
             ]
-            .spacing(8);
+            .spacing(8)
+            .width(Length::Fill);
             if let Some(branch) = &self.delete_branch_pending {
                 let mut confirm = button("Delete reviewed local branch").style(button::danger);
                 if !self.loading {
@@ -314,6 +398,103 @@ impl Desktop {
                     .push(button("Cancel transfer").on_press(Message::CancelTransfer));
             }
         }
+        let changes_detail: Element<'_, Message> = if let Some(review) = &self.hunk_review {
+            let mut close = button("Close hunk review");
+            if !self.loading {
+                close = close.on_press(Message::CancelHunks);
+            }
+            let mut contents = column![
+                text(format!(
+                    "{:?} hunks: {}",
+                    review.side,
+                    review.change.path.display()
+                )),
+                text("Select blocks or changed lines; the working file stays unchanged."),
+                close
+            ]
+            .spacing(8)
+            .width(Length::Fill);
+            let line_controls = review.line_selection_available();
+            if !line_controls {
+                contents=contents.push(text("Line controls need at most 64 KiB and 1,024 changed rows. Whole hunks remain available.").size(14));
+            }
+            for (index, hunk) in review.hunks.iter().enumerate() {
+                let (label, message) = match review.side {
+                    crate::HunkSide::Unstaged => ("Stage", Message::StageHunk(index)),
+                    crate::HunkSide::Staged => ("Unstage", Message::UnstageHunk(index)),
+                };
+                let mut stage = button(text(format!("{label} hunk {}", index + 1)));
+                if !self.loading {
+                    stage = stage.on_press(message);
+                }
+                let mut selection = checkbox(
+                    format!("Include hunk {}", index + 1),
+                    self.selected_hunks.contains(&index),
+                );
+                if !self.loading {
+                    selection =
+                        selection.on_toggle(move |selected| Message::ToggleHunk(index, selected));
+                }
+                if line_controls {
+                    if hunk.lines().any(|row| row.starts_with("\\ No newline")) {
+                        contents=contents.push(text("Missing final newline: adjoining EOF changes may need to be selected together.").size(14));
+                    }
+                    for (line, row) in hunk.split_inclusive('\n').enumerate() {
+                        if matches!(row.as_bytes().first(), Some(b'+' | b'-')) {
+                            let coordinate = crate::HunkLine { hunk: index, line };
+                            let checked = self.selected_hunks.contains(&index)
+                                || self.selected_lines.contains(&coordinate);
+                            let mut choose = checkbox(row.trim_end_matches(['\r', '\n']), checked)
+                                .font(iced::Font::MONOSPACE);
+                            if !self.loading {
+                                choose = choose.on_toggle(move |selected| {
+                                    Message::ToggleHunkLine(coordinate, selected)
+                                });
+                            }
+                            contents = contents.push(choose);
+                        } else {
+                            contents = contents.push(
+                                text(row.trim_end_matches(['\r', '\n']))
+                                    .font(iced::Font::MONOSPACE),
+                            );
+                        }
+                    }
+                } else {
+                    contents = contents.push(text(hunk).font(iced::Font::MONOSPACE));
+                }
+                contents = contents.push(selection).push(stage);
+            }
+            let label = match review.side {
+                crate::HunkSide::Unstaged => "Stage",
+                crate::HunkSide::Staged => "Unstage",
+            };
+            let action = if self.selected_lines.is_empty() {
+                format!("{label} selected ({})", self.selected_hunks.len())
+            } else {
+                format!(
+                    "{label} selected lines ({})",
+                    self.combined_hunk_lines(review).len()
+                )
+            };
+            let mut apply = button(text(action));
+            if !self.loading && (!self.selected_hunks.is_empty() || !self.selected_lines.is_empty())
+            {
+                apply = apply.on_press(Message::ApplySelectedHunks(review.side));
+            }
+            column![
+                scrollable(contents)
+                    .height(Length::Fill)
+                    .width(Length::Fill),
+                apply
+            ]
+            .spacing(8)
+            .width(Length::FillPortion(3))
+            .into()
+        } else {
+            scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
+                .width(Length::FillPortion(3))
+                .into()
+        };
         let content: Element<'_, Message> = if self.show_history {
             let mut history = column![text("Commits").size(20)].spacing(6);
             if self.history_commits.is_empty() {
@@ -358,17 +539,50 @@ impl Desktop {
             .height(Length::Fill)
             .into()
         } else {
-            row![
-                scrollable(files).width(Length::FillPortion(1)),
-                scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
-                    .width(Length::FillPortion(3))
+            column![
+                row![
+                    scrollable(files).width(Length::FillPortion(1)),
+                    changes_detail
+                ]
+                .spacing(16)
+                .height(Length::Fill),
+                side_confirmation
             ]
-            .spacing(16)
+            .spacing(8)
             .height(Length::Fill)
             .into()
         };
-        let commit_controls: Element<'_, Message> = if self.show_history || self.snapshot.is_none()
-        {
+        let commit_controls: Element<'_, Message> = if self.show_history {
+            let mut create_at = button("Create branch at selected commit");
+            if !self.loading
+                && !self.new_branch.is_empty()
+                && self
+                    .commit_details
+                    .as_ref()
+                    .is_some_and(|details| self.history_commits.contains(&details.commit))
+                && self.snapshot.as_ref().is_some_and(|snapshot| {
+                    snapshot.commit_basis.merge_heads.is_none()
+                        && snapshot.commit_basis.rebase.is_none()
+                })
+            {
+                create_at = create_at.on_press(Message::CreateBranchAtCommit);
+            }
+            column![
+                text(
+                    self.commit_details
+                        .as_ref()
+                        .map(|details| format!("Branch start: {}", details.commit.oid))
+                        .unwrap_or_else(|| String::from("Select a commit to create a branch"))
+                )
+                .size(14),
+                text("Create a local branch here; keep the current branch checked out").size(14),
+                text_input("New branch name", &self.new_branch)
+                    .on_input(Message::BranchNameChanged),
+                create_at
+            ]
+            .spacing(6)
+            .into()
+        } else if self.snapshot.is_none() {
             column![].into()
         } else {
             column![
@@ -473,7 +687,8 @@ impl Desktop {
                     branch_controls,
                     text(&self.detail).font(iced::Font::MONOSPACE)
                 ]
-                .spacing(20),
+                .spacing(20)
+                .width(Length::Fill),
             )
             .height(Length::Fill)
             .into(),
@@ -507,8 +722,11 @@ impl Desktop {
                     text("Create a repository").size(20),
                     text_input("New or existing project folder", &self.init_destination)
                         .on_input(Message::InitDestinationChanged),
-                    text_input("Initial branch (default: main)", &self.init_branch)
-                        .on_input(Message::InitBranchChanged),
+                    text_input(
+                        "Initial branch (blank: Git preference or main)",
+                        &self.init_branch
+                    )
+                    .on_input(Message::InitBranchChanged),
                     initialize,
                     text("Clone a repository").size(20),
                     text_input("Clone URL or local source", &self.clone_source)

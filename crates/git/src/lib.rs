@@ -1,14 +1,27 @@
 //! Git adapter with literal path arguments and serialized local writes.
+mod basis;
+use basis::commit_basis;
 mod branches;
 mod conflicts;
-pub use conflicts::{inspect_conflict, resolve_conflict};
+pub use conflicts::{
+    apply_conflict_side_resolution, inspect_conflict, inspect_conflict_side, resolve_conflict,
+    review_conflict_side_resolution,
+};
+mod process;
+mod read_output;
 mod runtime;
+mod working_files;
 pub use runtime::git_runtime;
+mod hunks;
+pub use hunks::{
+    review_hunks, review_staged_hunks, stage_hunk, stage_hunks, stage_lines, unstage_hunk,
+    unstage_hunks, unstage_lines,
+};
 mod history;
 mod init;
 pub use history::{commit_details, commit_file_diff, commit_history};
 mod merge;
-pub use init::init_repository;
+pub use init::{init_repository, init_repository_with_default_branch};
 pub use merge::{abort_merge, execute_merge, preview_merge};
 mod rebase;
 mod remotes;
@@ -16,7 +29,10 @@ pub use rebase::{abort_rebase, continue_rebase, execute_rebase, preview_rebase};
 mod stash;
 pub use stash::{apply_stash, save_stash};
 mod transfer;
-pub use branches::{create_branch, delete_local_branch, rename_current_branch, switch_branch};
+pub use branches::{
+    create_branch, create_branch_at_commit, delete_local_branch, rename_current_branch,
+    rename_local_branch, switch_branch,
+};
 use desktop_core::{CommitBasis, FileChange, FileDiff, Repository, RepositorySnapshot};
 pub use remotes::{
     add_remote, clone_repository, clone_repository_with_control, remote_operation,
@@ -24,9 +40,9 @@ pub use remotes::{
 };
 use std::{
     ffi::OsStr,
-    io::{self, Write},
+    io,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     sync::Mutex,
 };
 pub use transfer::TransferControl;
@@ -58,23 +74,6 @@ fn git_command(path: &Path) -> Command {
     command
 }
 
-fn read_bytes<S: AsRef<OsStr>>(path: &Path, args: &[S]) -> io::Result<Vec<u8>> {
-    let output = git_command(path)
-        .arg("--no-optional-locks")
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Err(io::Error::other(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
-    }
-    Ok(output.stdout)
-}
-
-fn read(path: &Path, args: &[&str]) -> io::Result<String> {
-    Ok(String::from_utf8_lossy(&read_bytes(path, args)?).into_owned())
-}
-
 fn file_path(bytes: &[u8]) -> io::Result<PathBuf> {
     #[cfg(unix)]
     {
@@ -89,10 +88,17 @@ fn file_path(bytes: &[u8]) -> io::Result<PathBuf> {
     }
 }
 
+fn repository_root(path: &Path) -> io::Result<PathBuf> {
+    let root = read_output::complete(path, &["rev-parse", "--show-toplevel"], 64 * 1024)?;
+    // Remove only Git's terminator; a native root name may itself contain newlines.
+    file_path(root.strip_suffix(b"\n").unwrap_or(&root))
+}
+
 fn changes(path: &Path) -> io::Result<Vec<FileChange>> {
-    let output = read_bytes(
+    let output = read_output::complete(
         path,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        8 * 1024 * 1024,
     )?;
     let mut records = output.split(|b| *b == 0).filter(|r| !r.is_empty());
     let mut changes = Vec::new();
@@ -121,11 +127,18 @@ fn changes(path: &Path) -> io::Result<Vec<FileChange>> {
 }
 
 /// Read a repository without changing its index or working tree.
+///
+/// # Errors
+///
+/// Returns an error if Git cannot inspect the repository or its metadata is malformed.
 pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
-    let root = read_bytes(path, &["rev-parse", "--show-toplevel"])?;
-    // Git terminates this path with one newline; filenames may themselves contain newlines.
-    let root = file_path(root.strip_suffix(b"\n").unwrap_or(&root))?;
-    let status = read(&root, &["status", "--short", "--branch"])?;
+    let root = repository_root(path)?;
+    let status = String::from_utf8_lossy(&read_output::complete(
+        &root,
+        &["status", "--short", "--branch"],
+        8 * 1024 * 1024,
+    )?)
+    .into_owned();
     let commit_basis = commit_basis(&root)?;
     let commits = if let Some(head) = &commit_basis.head {
         history::commit_history(&root, head.trim(), 0)?
@@ -169,26 +182,42 @@ pub fn snapshot(path: &Path) -> io::Result<RepositorySnapshot> {
 }
 
 /// Show index and working-tree differences separately, including unborn branches.
-/// The selected path must still occur in the repository status.
+/// The selected path must still occur in the repository status. Tracked patches
+/// retain at most 256 KiB of raw output per side, with an explicit truncation marker.
+///
+/// # Errors
+///
+/// Returns an error if the selected change is stale, unsupported or cannot be read by Git.
+/// Unix patch subprocesses also fail on a thirty-second deadline or oversized stderr.
+/// Untracked regular-file capture is bounded to 1 MiB plus one overflow probe byte;
+/// raced leaf/type changes and unsupported ancestor paths can also return I/O errors.
 pub fn diff(path: &Path, selected: &FileChange) -> io::Result<FileDiff> {
+    let root = repository_root(path)?;
+    let path = root.as_path();
     if !changes(path)?.contains(selected) {
         return Err(io::Error::other(
             "File status changed; refresh the repository",
         ));
     }
     if selected.index == '?' {
-        let full = path.join(&selected.path);
-        let metadata = std::fs::symlink_metadata(&full)?;
-        let preview = if metadata.file_type().is_symlink() {
-            format!("Symbolic link → {}", std::fs::read_link(full)?.display())
-        } else if !metadata.is_file() || metadata.len() > 1024 * 1024 {
-            String::from("Preview unavailable: non-regular file or file larger than 1 MiB")
-        } else {
-            let bytes = std::fs::read(full)?;
-            if bytes.contains(&0) {
-                String::from("Binary file")
-            } else {
-                String::from_utf8_lossy(&bytes).into_owned()
+        use working_files::WorkingFile;
+        let preview = match working_files::inspect(path, &selected.path, 1024 * 1024)? {
+            WorkingFile::Symlink(target) => format!("Symbolic link → {}", target.display()),
+            WorkingFile::Unsupported | WorkingFile::TooLarge => {
+                String::from("Preview unavailable: non-regular file or file larger than 1 MiB")
+            }
+            WorkingFile::Missing => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Untracked file changed; refresh the repository",
+                ))
+            }
+            WorkingFile::Regular { bytes, .. } => {
+                if bytes.contains(&0) {
+                    String::from("Binary file")
+                } else {
+                    String::from_utf8_lossy(&bytes).into_owned()
+                }
             }
         };
         return Ok(FileDiff {
@@ -212,7 +241,16 @@ pub fn diff(path: &Path, selected: &FileChange) -> io::Result<FileDiff> {
         if let Some(original) = &selected.original_path {
             args.push(original.as_os_str());
         }
-        Ok(String::from_utf8_lossy(&read_bytes(path, &args)?).into_owned())
+        read_output::preview(
+            path,
+            &args,
+            256 * 1024,
+            if cached {
+                "Staged diff"
+            } else {
+                "Unstaged diff"
+            },
+        )
     };
     Ok(FileDiff {
         staged: read_diff(true)?,
@@ -225,35 +263,9 @@ pub fn diff(path: &Path, selected: &FileChange) -> io::Result<FileDiff> {
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 fn run_write<S: AsRef<OsStr>>(path: &Path, args: &[S], input: Option<&str>) -> io::Result<String> {
-    let mut child = git_command(path)
-        .args(args)
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let input_result = if let Some(message) = input {
-        child
-            .stdin
-            .take()
-            .expect("piped stdin")
-            .write_all(message.as_bytes())
-    } else {
-        Ok(())
-    };
-    let output = child.wait_with_output()?;
-    if !output.status.success() {
-        return Err(io::Error::other(format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
-    input_result?;
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    let mut command = git_command(path);
+    command.args(args);
+    process::write_output(command, input)
 }
 
 fn validate_selection(path: &Path, selected: &FileChange) -> io::Result<()> {
@@ -272,6 +284,10 @@ fn validate_selection(path: &Path, selected: &FileChange) -> io::Result<()> {
 
 /// Stage the selected file's current working-tree contents, including deletion.
 /// Status is revalidated, but concurrent external edits to file contents are not fenced.
+///
+/// # Errors
+///
+/// Returns an error for a stale/conflicted selection, Git rejection or filesystem failure.
 pub fn stage(path: &Path, selected: &FileChange) -> io::Result<()> {
     let _guard = WRITE_LOCK
         .lock()
@@ -296,6 +312,10 @@ pub fn stage(path: &Path, selected: &FileChange) -> io::Result<()> {
 }
 
 /// Remove a selected change from the index without changing working-tree files.
+///
+/// # Errors
+///
+/// Returns an error for a stale/conflicted selection, Git rejection or filesystem failure.
 pub fn unstage(path: &Path, selected: &FileChange) -> io::Result<()> {
     let _guard = WRITE_LOCK
         .lock()
@@ -323,6 +343,10 @@ pub fn unstage(path: &Path, selected: &FileChange) -> io::Result<()> {
 /// Commit the entire staged index, preserving unstaged changes and configured hooks.
 /// Reject an index changed since the snapshot. External clients can still race
 /// between this check and Git acquiring its own locks.
+///
+/// # Errors
+///
+/// Returns an error for a stale basis, unresolved operation, invalid message, hook/signing failure or Git rejection.
 pub fn commit(path: &Path, message: &str, expected: &CommitBasis) -> io::Result<String> {
     let _guard = WRITE_LOCK
         .lock()
@@ -352,18 +376,4 @@ pub fn commit(path: &Path, message: &str, expected: &CommitBasis) -> io::Result<
         return Err(io::Error::other("No staged changes to commit"));
     }
     run_write(path, &["commit", "--file=-"], Some(message))
-}
-
-fn commit_basis(path: &Path) -> io::Result<CommitBasis> {
-    let branch = match read_bytes(path, &["symbolic-ref", "--quiet", "HEAD"]) {
-        Ok(bytes) => Some(file_path(bytes.strip_suffix(b"\n").unwrap_or(&bytes))?.into_os_string()),
-        Err(_) => None,
-    };
-    Ok(CommitBasis {
-        index: read_bytes(path, &["ls-files", "--stage", "-z"])?,
-        head: read(path, &["rev-parse", "--verify", "HEAD"]).ok(),
-        branch,
-        merge_heads: merge::metadata(path, "MERGE_HEAD")?,
-        rebase: rebase::state(path)?,
-    })
 }

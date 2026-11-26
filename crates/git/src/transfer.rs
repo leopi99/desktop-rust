@@ -3,7 +3,6 @@ use std::{
     ffi::OsStr,
     io::{self, Read},
     path::Path,
-    process::{Child, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, MutexGuard, TryLockError,
@@ -113,23 +112,6 @@ fn drain(mut pipe: impl Read, control: TransferControl) -> io::Result<Vec<u8>> {
     }
 }
 
-fn terminate(child: &mut Child) {
-    #[cfg(unix)]
-    {
-        // Every transfer starts its own process group, including Git's transport helpers.
-        let group = -(child.id() as libc::pid_t);
-        unsafe {
-            libc::kill(group, libc::SIGTERM);
-        }
-        thread::sleep(Duration::from_millis(250));
-        unsafe {
-            libc::kill(group, libc::SIGKILL);
-        }
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
 pub(super) fn run<S: AsRef<OsStr>>(
     path: &Path,
     args: &[S],
@@ -137,55 +119,41 @@ pub(super) fn run<S: AsRef<OsStr>>(
 ) -> io::Result<String> {
     control.check()?;
     let mut command = super::git_command(path);
-    command
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn()?;
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
+    command.args(args);
+    let mut child = super::process::spawn(&mut command)?;
     let out_control = control.clone();
     let err_control = control.clone();
-    let out = thread::spawn(move || drain(stdout, out_control));
-    let err = thread::spawn(move || drain(stderr, err_control));
+    let readers = super::process::Readers::start(
+        &mut child,
+        move |stdout| drain(stdout, out_control),
+        move |stderr| drain(stderr, err_control),
+    )?;
     let mut status = None;
     let outcome = loop {
         if status.is_none() {
             match child.try_wait() {
                 Ok(result) => status = result,
                 Err(error) => {
-                    terminate(&mut child);
+                    super::process::terminate(&mut child);
                     break Err(error);
                 }
             }
         }
         if let Some(status) = status {
-            if out.is_finished() && err.is_finished() {
+            if readers.is_finished() {
                 break Ok(status);
             }
         }
         if let Err(error) = control.check() {
-            terminate(&mut child);
+            super::process::terminate(&mut child);
             break Err(error);
         }
         thread::sleep(Duration::from_millis(20));
     };
     // Readers are drained before releasing the repository write lock.
-    let stdout = out
-        .join()
-        .map_err(|_| io::Error::other("Output reader failed"))?;
-    let stderr = err
-        .join()
-        .map_err(|_| io::Error::other("Error reader failed"))?;
+    let captured = readers.join();
     let status = outcome?;
-    let stdout = stdout?;
-    let stderr = stderr?;
+    let (stdout, stderr) = captured?;
     let diagnostics = format!(
         "{}{}",
         String::from_utf8_lossy(&stdout),
@@ -250,6 +218,53 @@ mod tests {
         assert_eq!(output.len(), 2 * OUTPUT_LIMIT);
         assert!(control.progress().len() <= PROGRESS_LIMIT);
     }
+    #[test]
+    fn deadline_remains_active_after_git_exits_with_inherited_pipes() {
+        let control = TransferControl::with_timeout(Duration::from_millis(100));
+        let started = Instant::now();
+        assert_eq!(
+            alias("sleep 30 & exit 0", &control).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let retry = alias("printf 'retry succeeded'", &TransferControl::default()).unwrap();
+        assert_eq!(retry, "retry succeeded");
+    }
+
+    #[test]
+    fn cancellation_with_inherited_pipes_waits_for_cleanup_before_retry() {
+        let control = TransferControl::default();
+        let worker_control = control.clone();
+        let started = Instant::now();
+        let worker =
+            thread::spawn(move || alias("printf 'ready' >&2; sleep 30 & exit 0", &worker_control));
+        while !control.progress().contains("ready") {
+            assert!(started.elapsed() < Duration::from_secs(5));
+            thread::sleep(Duration::from_millis(10));
+        }
+        control.cancel();
+        assert_eq!(
+            worker.join().unwrap().unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(
+            alias("printf 'retry succeeded'", &TransferControl::default()).unwrap(),
+            "retry succeeded"
+        );
+    }
+
+    #[test]
+    fn failed_transfer_retains_both_diagnostic_tails() {
+        let control = TransferControl::default();
+        let error = alias("head -c 100000 /dev/zero; printf 'stdout tail'; head -c 100000 /dev/zero >&2; printf 'stderr tail' >&2; exit 7", &control).unwrap_err();
+        let diagnostics = error.to_string();
+        assert_eq!(diagnostics.len(), OUTPUT_LIMIT * 2);
+        assert!(diagnostics.contains("stdout tail"));
+        assert!(diagnostics.ends_with("stderr tail"));
+        assert!(control.progress().len() <= PROGRESS_LIMIT);
+    }
+
     #[test]
     fn progress_keeps_valid_utf8_at_the_size_boundary() {
         let control = TransferControl::default();

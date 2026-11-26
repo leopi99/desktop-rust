@@ -1,3 +1,6 @@
+//! Git integration coverage for remote settings.
+#![cfg(test)]
+
 use desktop_core::{Remote, RemoteAction, RemoteUrlKind};
 use std::{
     path::{Path, PathBuf},
@@ -339,4 +342,133 @@ fn existing_non_utf8_remote_names_can_be_edited_and_removed() {
         .unwrap()
         .remotes
         .is_empty());
+}
+
+#[test]
+fn remote_count_limit_refuses_edits_and_recovers_without_changing_config() {
+    let f = Fixture::new();
+    f.add();
+    let original = f.config();
+    let selected = f.remote();
+    let mut config = original.clone();
+    for index in 0..63 {
+        config.extend_from_slice(
+            format!("\n[remote \"extra-{index:02}\"]\nurl = https://example.invalid/project.git\n")
+                .as_bytes(),
+        );
+    }
+    std::fs::write(f.repo.join(".git/config"), &config).unwrap();
+    assert_eq!(
+        desktop_git::add_remote(&f.repo, "too-many", "https://example.invalid/new.git")
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    assert_eq!(f.config(), config);
+    config
+        .extend_from_slice(b"\n[remote \"overflow\"]\nurl = https://example.invalid/project.git\n");
+    std::fs::write(f.repo.join(".git/config"), &config).unwrap();
+    assert_eq!(
+        desktop_git::snapshot(&f.repo).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::remove_remote(&f.repo, &selected)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.config(), config);
+    std::fs::write(f.repo.join(".git/config"), original).unwrap();
+    desktop_git::set_remote_url(
+        &f.repo,
+        &selected,
+        RemoteUrlKind::Fetch,
+        "https://example.invalid/recovered.git",
+    )
+    .unwrap();
+    assert_eq!(
+        f.remote().fetch_urls[0],
+        "https://example.invalid/recovered.git"
+    );
+}
+
+#[test]
+fn oversized_remote_endpoints_block_edits_and_transfer_before_writes() {
+    let f = Fixture::new();
+    f.commit();
+    f.add();
+    let selected = f.remote();
+    let before = desktop_git::snapshot(&f.repo).unwrap().commit_basis;
+    let original = f.config();
+    let mut config = original.clone();
+    config.extend_from_slice(
+        format!(
+            "\n[remote \"origin\"]\nurl = https://example.invalid/{}\n",
+            "p".repeat(70_000)
+        )
+        .as_bytes(),
+    );
+    std::fs::write(f.repo.join(".git/config"), &config).unwrap();
+    assert_eq!(
+        desktop_git::snapshot(&f.repo).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::set_remote_url(
+            &f.repo,
+            &selected,
+            RemoteUrlKind::Fetch,
+            "https://example.invalid/new.git"
+        )
+        .unwrap_err()
+        .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::remote_operation(&f.repo, &selected, RemoteAction::Fetch, &before)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.config(), config);
+    std::fs::write(f.repo.join(".git/config"), &original).unwrap();
+    let huge = format!("https://example.invalid/{}", "p".repeat(70_000));
+    assert_eq!(
+        desktop_git::set_remote_url(&f.repo, &selected, RemoteUrlKind::Fetch, &huge)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    assert_eq!(f.config(), original);
+    assert_eq!(desktop_git::snapshot(&f.repo).unwrap().commit_basis, before);
+}
+
+#[test]
+fn excessive_url_count_is_rejected_without_replacing_any_endpoint() {
+    let f = Fixture::new();
+    f.add();
+    let selected = f.remote();
+    let original = f.config();
+    let mut config = original.clone();
+    for index in 0..64 {
+        config.extend_from_slice(
+            format!("\n[remote \"origin\"]\nurl = https://example.invalid/{index}.git\n")
+                .as_bytes(),
+        );
+    }
+    std::fs::write(f.repo.join(".git/config"), &config).unwrap();
+    assert_eq!(
+        desktop_git::snapshot(&f.repo).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        desktop_git::remove_remote(&f.repo, &selected)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(f.config(), config);
+    std::fs::write(f.repo.join(".git/config"), original).unwrap();
+    assert_eq!(f.remote(), selected);
 }

@@ -4,14 +4,44 @@ The fork targets full behavioral parity with stable GitHub Desktop releases,
 starting with Linux x86_64. Iced is the Rust UI; Git CLI remains the Git engine.
 The Electron sources are reference material, not the implementation to merge into Rust.
 
+## Project tracking and Rust rules
+
+Use [status](rust/status.md) for completed/prototype work,
+[the backlog](rust/backlog.md) for ordered remaining tasks and batch acceptance,
+and [the Rust quality standard](rust/quality.md) for required engineering checks.
+Rust-specific agent instructions are in [crates/AGENTS.md](../crates/AGENTS.md).
+
 ## Running
 
 Install a stable Rust toolchain and Git, then run `cargo run -p desktop-rust`.
 The preview opens a local repository and displays status and recent history.
 Select a changed file to inspect staged and working-tree differences separately.
-Untracked text files have a preview up to 1 MiB; binary files are identified,
-and symbolic links show their target rather than following it. Refresh reloads
-status and history. Paths retain their filesystem encoding on Unix.
+Tracked staged and unstaged patch previews each retain at most 256 KiB of raw
+output, with an explicit marker when clipped. On Unix each patch subprocess has
+a 30-second deadline and a 16 KiB stderr cap; excess stdout is drained/discarded,
+and the final exit status is checked before displaying the prefix. UTF-8
+replacement can enlarge the displayed byte size. This limits parent capture,
+not Git's own memory. Windows still buffers the full patch before clipping and
+has no equivalent patch deadline (PLAT-01). The preceding status read has its
+own 8 MiB capture cap and Unix deadline. These separate limits are not one
+deadline for the entire `diff` operation. Selecting Stage still stages the complete current file.
+Regular untracked files up to 1 MiB can be previewed; binary contents within that
+bound are identified without text rendering. The read itself is capped at the
+limit plus one overflow probe byte, including when the file grows after metadata
+inspection. Oversized/growing files have no accepted partial prefix and retain
+full-file staging. Symbolic links show their target spelling without reading its
+contents. Refresh reloads status and history. Paths retain their native encoding.
+Preview requests from a repository subdirectory resolve root-relative selected
+paths against Git's actual working-tree root, including root names with newlines.
+
+Untracked preview and conflict/hunk working-content capture share the bounded
+filesystem reader. Conflict/hunk capture retains its 8 MiB limit. Ancestor symlinks
+and non-directories are refused; Unix final-component opens use no-follow and
+nonblocking flags, with regular-file descriptor checks before reading. Ancestors
+are rechecked after opening, but these checks do not fence external renames.
+Windows retains best-effort metadata/type checks without the Unix leaf guarantee.
+The byte bounds do not impose a deadline on regular/network filesystem I/O; they
+are separate from the bounded Git subprocess reads described above.
 Repository operations run on a worker thread. Stage and Unstage act on a single
 file and preserve working-tree contents when unstaging. Enter a summary and optional
 description to commit **all staged changes**, including files staged outside the app.
@@ -23,7 +53,8 @@ Writes within this process are serialized; external clients can still race betwe
 the freshness check and Git acquiring its mandatory locks. Stage uses current file
 contents, so edits made after previewing a diff must be reviewed before staging.
 Editing the repository path invalidates the loaded write target. Full-file staging
-is supported; hunk selection and interactive hook/signing prompts remain planned.
+is supported; the scoped hunk-staging workflow below is also available. Line-level
+selection and interactive hook/signing prompts remain planned.
 The branch controls list local branches, show the current branch (or detached HEAD),
 and create-and-switch or switch to an existing branch. New branch names are checked
 as literal refs: options and previous-checkout shorthand are rejected. Switching
@@ -34,9 +65,167 @@ automatic stash or remote branch guessing is used. Before the first commit,
 create-and-switch sets the initial branch name; no branch ref exists until commit.
 Commit drafts survive branch changes; a failed creation also retains the branch name.
 
-## Rename the current branch
+## Stage or unstage selected hunks
 
-In Branches, enter a new name in New name for the current branch and choose
+For a regular text modification, addition or deletion in Changes, choose Review
+unstaged hunks.
+The app reads a complete, separate patch and displays context-bearing blocks with
+Stage hunk buttons. Each action adds just that block to the index, keeps the working
+file intact and preserves already staged changes and other files. Commit still
+commits the entire index, so review its contents normally. To stage another block,
+review again after the automatic refresh. Close hunk review discards the choice.
+Use Include hunk checkboxes to select several blocks in the same file, then choose
+Stage selected or Unstage selected below the scrolling review. The action shows
+the selection count and is disabled for an empty selection. Individual Stage hunk
+and Unstage hunk buttons still act only on their named block. Either action consumes
+the review and clears the checkbox selection; review again after refresh.
+The ordinary, potentially clipped diff preview cannot authorize a partial write.
+
+For a staged text change, choose Review staged hunks and then Unstage hunk.
+This reverses only that block from the HEAD-to-index comparison; it never restores
+HEAD into the working file. Other staged blocks and additional working-only edits
+remain intact. The staged/unstaged label and action are bound to the review:
+a forward-stage review cannot authorize unstaging, and the reverse is also refused.
+Unstage at file level continues to reset the whole file's index entry.
+
+This scope accepts regular UTF-8 text modifications with unchanged Git file mode,
+regular additions/deletions, working edits at staged rename destinations and no
+content-conversion policy. Coordinated rename changes, symlinks, submodules,
+binary/non-UTF-8 data and
+filters/text/EOL/ident/encoding conversion settings require full-file staging or an
+external Git tool. CRLF bytes without Git conversion and no-newline markers are
+preserved. Staged mode changes to existing files remain outside this scope.
+Absent working files use a complete bounded source read from the index, or HEAD
+for a staged deletion; source text must be UTF-8 without NUL bytes.
+
+For a new file, review compares against the null path without inserting an
+intent-to-add entry. Both HEAD and index must lack the path; recreated tracked
+paths and explicit intent entries require full-file staging. Selected added rows
+form the new index file, leaving all working bytes intact. This also works before
+the first commit. Further working edits to a staged addition can be reviewed normally.
+An addition has one complete hunk; removing some staged rows retains the index
+file and its executable mode. Removing the entire hunk or all its changed rows
+removes the index entry, leaving the working file untracked. Empty new files have
+no text hunk and use full-file staging. Existing complete-patch and line-control
+limits apply to additions as well.
+
+For an absent deleted file, selecting minus rows stages just those line removals.
+Unselected rows remain in the index with its original executable mode. The whole
+hunk or all changed rows stages the entire deletion, removing the index entry.
+Unstaging selected minus rows of a staged deletion restores only those rows to
+the index, retaining the HEAD file mode. Review again to remove further staged
+changes; staged modifications/additions can also be reviewed while the working
+file remains absent. This includes additions staged before being removed from
+disk. None of these actions recreates a working file. A recreated working path
+invalidates a deletion review. Empty deleted files have no text hunk and use
+full-file controls. Binary, special and converted sources remain unsupported.
+
+After Git reports an already staged rename, Review unstaged hunks can select
+working edits at its destination. The comparison is index-to-working at the new
+path; the cached patch updates only that destination index entry. The original
+path stays removed from the index, and an independently recreated working file at
+the old name is preserved. Prior staged edits and the destination executable mode
+stay in place. If the destination is missing, selecting deleted rows keeps the
+remaining index text under the new name. Staging that entire deletion removes
+the destination entry too, leaving the original path's staged deletion.
+
+A pure rename has no unstaged text hunk. Staged-side hunk review of a rename,
+partial unstaging of its content/move, working-tree renames and copies remain
+outside this scope; file-level Unstage still resets both observed rename paths.
+The app uses Git's observed status and does not infer a move from separate
+addition/deletion records. Detection/configuration or similarity changes can
+invalidate the review and require a fresh selection.
+
+The complete patch is limited to 512 KiB and 128 hunks; working-file contents to
+8 MiB, also for source blobs read when working files are absent. An oversized or
+unsupported patch is refused entirely, never staged from a clipped prefix. Git path quoting is retained exactly, including native Unix names.
+The parser checks a single regular-file header and each hunk's row counts. Before
+writing, the app rereads the full review: comparison direction, bytes/mode, status, index/HEAD/operation
+state, attributes, settings and every patch block must still match. Navigation,
+selection, another preview or refresh invalidates the review. Busy controls cannot
+redirect a write, and commit drafts survive successes and failures.
+
+The API accepts a nonempty set of unique valid hunk indices, normalizes them to
+patch order and rejects duplicate or out-of-range choices without staging a prefix.
+Git first checks then applies one patch containing the header and the selected
+context-bearing changes with apply --cached, adding --reverse only for a staged
+review. It does not loop over separate index writes for each block. There is no checkout, force, three-way merge, rejected-patch output or working-file
+write. Writes share the existing process lock and Git's index lock. External clients
+and configured hooks can still race preflight checks. A write failure refreshes the
+repository and does not automatically roll back over subsequent edits. Read bounds
+follow the shared Unix policy; automatic cancellation of stalled local writes and
+native Windows capture guarantees remain separate backlog items.
+
+## Select individual changed lines
+
+Within a hunk review, added and deleted rows have their own checkboxes when the
+complete review fits 64 KiB and 1,024 changed rows. Select both minus and plus rows
+to include a replacement; selecting only one means just that deletion or addition.
+For example, staging only the added row of `old` → `new` retains `old` and adds
+`new` after it; staging only the deleted row removes `old` without adding `new`.
+The same rows in a staged review identify the changes to remove from the index.
+Context rows and hunk headers cannot be selected. Within a contiguous change run,
+retained old rows precede selected additions; choose the full run when the entire
+replacement order matters.
+
+Whole hunks and individual rows can be combined in one action. Choosing a whole
+hunk replaces its individual choices; unchecking one of its checked changed rows
+refines that hunk into the remaining individual rows. The fixed footer then shows
+Stage selected lines or Unstage selected lines and the total number of changed
+rows, including any selected whole hunks. Single-hunk buttons still act only on
+the named hunk. All selections clear with review invalidation or a write; commit
+drafts stay intact.
+
+The app rebuilds context and counts for the selected direction: unselected deleted
+rows become context for staging, and unselected added rows become context for
+unstaging. The opposite unselected rows are omitted. Counts and offsets across
+hunks are checked before the same cached check/apply workflow runs. No working-file
+rewrite, global index reset, three-way fallback or automatic rollback is introduced.
+The complete review, native quoted paths and freshness guards remain unchanged.
+
+Missing-final-newline markers do not block line controls. The reconstructed old
+and new streams are checked independently: once a stream reaches an unterminated
+row, no later row may belong to that stream. This permits partial edits before an
+unchanged unterminated context line and valid EOF deletions without adding bytes.
+A selection that would append after a missing newline is refused before index
+mutation; choose the adjoining EOF changes together or the whole hunk instead.
+For example, adding `new` after retained unterminated `old` would require an
+implicit separator and is refused. Selecting their complete replacement preserves
+its exact bytes. Newline-only changes and transitions to/from empty contents are
+supported. CRLF without Git conversion remains supported. Larger reviews retain
+whole-hunk controls up to their original limits.
+Line selection applies to the supported modifications, additions, deletions and
+staged rename destinations described above. Coordinated rename operations,
+special/binary formats, conversion policies and full interactive/platform parity
+remain outside this scope.
+
+## Create a branch from history
+
+In History, select a commit, enter New branch name and choose Create branch at
+selected commit. The full destination commit ID stays visible above the form,
+including while inspecting one of its file diffs. This creates a local reference
+without checking it out; the current branch or detached HEAD, staged/unstaged
+contents, untracked files and commit drafts remain in place. No upstream tracking
+is configured automatically, even with automatic tracking enabled in Git settings.
+Use Branches to switch to the created branch separately.
+
+Only a full commit object ID is accepted by the Git API: symbolic revisions,
+abbreviated hashes, missing objects, trees, blobs and tag objects are refused.
+The UI requires a loaded selection from the observed history list, an idle History
+panel and a name. Index/HEAD/branch freshness, active merge/rebase/cherry-pick/revert
+state, occupied destination refs and saved local destination configuration are
+checked before creation. Git owns ref locks; concurrent external clients can still
+race the preflight checks. No force, checkout, reset or remote write is requested.
+
+Success clears the shared branch-creation name; failure retains it. Both outcomes
+refresh repository/history state while keeping the History panel and unrelated
+drafts. Refresh invalidates commit selection, so select a commit again for another
+action. The input is shared with branch creation in Branches. This scoped history
+action does not implement reset, revert, cherry-pick or full upstream dialog parity.
+
+## Rename a local branch
+
+In Branches, enter a new name in New local branch name and choose
 Rename current branch. This renames only the observed, committed local branch;
 Git moves its reflog and local branch configuration. The commit ID, staged and
 unstaged changes and untracked files are preserved. Tracking keeps its existing
@@ -51,6 +240,15 @@ the current linked worktree is supported. Git uses its mandatory ref locks, with
 no forced overwrite. Preflight checks do not fence concurrent external clients;
 if Git fails after changing a ref, refresh shows the actual resulting state.
 
+To rename another local branch, select it in the branch list, enter its new name
+and choose Rename selected branch. This does not switch branches: current HEAD,
+staged/unstaged contents and untracked files remain intact. The observed target
+name, full object ID and current flag must still match. A branch used by any other
+worktree is refused, even when Git could update that worktree's branch name.
+The same destination/configuration and active-operation guards apply. The UI
+requires the Branches panel, an observed non-current branch and no write in flight;
+a failed action refreshes state and retains the rename draft.
+
 The rename field is separate from branch creation. Failures retain it, successful
 renames clear only that field, and changing repositories clears it. Commit and
 branch-creation drafts survive the rename. Integration tests cover tracking,
@@ -58,8 +256,8 @@ reflog, index/file preservation, stale observations, destination collisions,
 sequencer state, linked worktrees and native non-UTF-8 source names on Unix.
 
 This is a prototype under the existing `branches` feature in the upstream ledger.
-Renaming a different selected branch and case-only renames requiring a forced
-retry remain planned. Safe deletion of merged local branches is described below. The reference implementation in
+Current and selected-branch rename are implemented locally. Case-only renames
+requiring a forced retry remain unsupported. Safe deletion of merged local branches is described below. The reference implementation in
 `app/src/lib/git/branch.ts` supports a wider scope; this increment does not claim
 complete branch parity or advance release checkpoints. The input accepts a UTF-8
 new name, while an existing source name retains its native filesystem encoding.
@@ -106,6 +304,100 @@ confirmation have been captured and visually inspected on Linux using the
 software renderer at 960×640 and 1200×800. Interactive keyboard and complete
 end-to-end UI deletion checks remain outstanding.
 
+## Complete state and freshness scans
+
+Core snapshot/freshness reads reject incomplete output instead of parsing a prefix.
+Their raw stdout limits are:
+
+| Read | Limit |
+| --- | --- |
+| Human/porcelain status (each command) | 8 MiB |
+| Complete staged-index entries | 16 MiB |
+| Local branch listing | 4 MiB |
+| HEAD/symbolic ref, repository root and merge/rebase metadata paths | 64 KiB each |
+| Remote names, tracking metadata and each fetch/push URL list | 64 KiB per read |
+| Stash list and each tracked/untracked stash path stream | 4 MiB each |
+| Complete tracked-path scan for stash collision checks | 16 MiB |
+| Branch rename local-config and worktree guards | 4 MiB each |
+| Conflict attribute / rebase branch-tip / common ancestor | 64 KiB each |
+| Rebase plan and each collision path stream | 4 MiB each |
+| Rebase collision paths across all streams | 8 MiB total |
+| Complete tracked-path scan for rebase collisions | 16 MiB |
+
+On Unix each migrated subprocess has a 30-second deadline and a 16 KiB stderr cap,
+using managed process-group cleanup and joined readers. Windows validates these
+limits after whole-output buffering and still lacks equivalent memory/deadline
+bounds. Limits cover captured bytes, not Git's internal memory, parsed-model
+allocations or one overall snapshot deadline.
+
+HEAD and branch reads propagate failures. Only a quiet, empty exit 1 can denote
+absence for the selected Git commands. A missing HEAD commit is considered unborn
+only when a symbolic HEAD exists and its target ref is absent; malformed refs,
+missing commit objects and detached HEAD without a valid commit fail. Full native
+ref names and full commit IDs remain part of the freshness observation. These
+sequential reads do not fence concurrent external clients.
+
+Regression fixtures exceed the index/status and branch-list caps, verify refused
+commit/staging with unchanged index/HEAD/working files, and exercise recovery after
+restoring only the disposable fixture. The remote model accepts at most 64 remotes and 64 URLs per endpoint. New remote
+names/URLs are checked against the known metadata budgets before a write; external
+configuration and Git URL rewriting can still cause later reads to be rejected.
+Stash restore reviews at most 10,000 path records across the two path streams and
+loads the full tracked-path set once. Third-parent lookup failures propagate;
+only the selected quiet absence result can mean no saved untracked tree.
+
+Auxiliary regressions exercise excessive remote/URL counts, oversized endpoint,
+stash and local-config output, and stash collision review above 10,000 paths.
+They verify rejected writes, retained config/index/working data/stashes and recovery.
+These are per-subprocess byte/deadline limits and a bounded review count, not one
+operation-wide deadline; filesystem collision checks have no separate deadline.
+Conflict attributes and rebase preflight queries now use bounded complete reads.
+Shared ancestry queries require empty stdout and accept only a quiet exit 1 for
+non-ancestry; common-base output must contain a full object ID. The generic
+whole-output reader has been removed. Merge-tree now retains complete raw output
+within 4 MiB stdout and 64 KiB stderr; overflow fails after draining and joining,
+without parsing a prefix or interrupting a configured driver. This object-writing
+preview has no automatic deadline. Rebase uses marked 64 KiB per-stream diagnostic
+tails, preserving final exit status and paused-state detection. Windows retains
+explicit unbounded-capture fallbacks for read-only commands and the runtime probe.
+
+## Git pipe-reader lifecycle
+
+Transfers, the shared local-write runner and bounded Unix reads share a reader-pair
+owner. Both pipe threads
+start through fallible builders; failure to start either reader stops/reaps the
+managed child and waits for any started reader. At completion both workers are
+joined before a reader panic or I/O error is returned. Transfers retain their
+64 KiB per-stream diagnostic tails and 16 KiB live progress limit. Linux tests
+cover inherited pipes after Git exits, timeout/cancellation and a subsequent retry.
+Every Unix Git subprocess now uses the shared child/reader lifecycle. Windows
+still needs native process-tree/inherited-pipe cleanup and bounded read/probe
+fallbacks (PLAT-01). Remaining stalled-write policy is tracked as R-06 in
+[the backlog](rust/backlog.md).
+
+The shared local-write runner starts both output readers before feeding a commit
+message to stdin, then closes stdin, waits for Git and joins both readers. Each
+stream retains only its last 64 KiB of raw bytes with a marker for discarded
+output; UTF-8 replacement may enlarge the displayed string. Successful calls keep
+their stdout-only diagnostic contract. Git failure status and both diagnostic
+tails take precedence over a secondary stdin failure; an incomplete input write
+still fails even if the child exits successfully. Real Git redirects hook stdout
+to stderr, so those messages appear in the failure diagnostics.
+
+No automatic timeout or cancellation is imposed on local-write hooks/signing.
+A stalled child or inherited pipe can still keep the operation busy; interruption
+and recovery policy remains pending. I/O/setup errors do not promise rollback of
+an already started Git command. Existing freshness checks and repository refresh
+remain necessary. Merge-tree and rebase now share the same lifecycle with
+complete-protocol and diagnostic-tail policies respectively. Linux tests use real noisy hooks, large
+messages and staged/unstaged files, and verify retry after a rejected hook. The
+Linux pipe-deadlock regression uses coreutils `timeout` to bound the test itself.
+Additional regressions verify complete raw protocol bytes at exact limits, final
+exit status, overflow on either stream only after child completion, and successful
+retry. A noisy real merge driver makes preview fail without changing HEAD, index
+or working files; a noisy rebase driver still produces a supported paused state
+that can be aborted back to the original branch and contents.
+
 ## Git runtime diagnostics
 
 The Git panel shows the version reported by the system Git resolved through PATH.
@@ -119,12 +411,22 @@ The preview uses externally installed Git; it does not package or update Git and
 does not infer compatibility or security from the reported version. Later commands
 resolve the executable again, so a PATH/binary change can invalidate the observation.
 The diagnostic is not a prerequisite or capability gate for repository commands.
+On Unix the probe has a five-second deadline with bounded 512-byte stdout and
+1024-byte stderr capture. Oversized output fails instead of being accepted as a
+truncated version; raw bytes are validated before display. A timeout terminates
+the isolated process group, waits for the direct child and joins both readers
+before retry becomes available. Cleanup includes a short termination grace period.
+This Unix implementation is tested on Linux; the Windows fallback still buffers
+output and requires native process-tree/pipe handling before equivalent bounds
+can be enabled there.
 See [the first baseline triage](upstream/release-3.6.11.md) for the distinction
 between upstream's Git 2.56.1 bundle and the current Rust engine policy.
 
 Capture the diagnostic with `--panel git`. The offline smoke fixture includes that
-panel and a separate no-repository capture with Git absent from PATH, in addition
-to the existing panels and read-only deletion review. Both diagnostic states
+panel and no-repository captures with Git absent from PATH, plus Unix stalled/noisy
+Git shims, in addition to the existing panels and read-only deletion review. The
+timeout and overflow states were also visually inspected at both window sizes.
+The available/missing diagnostic states
 were captured and visually inspected on Linux/software rendering at 960×640 and
 1200×800 on 2026-11-24; the fixture files, refs, index and config were unchanged.
 Interactive keyboard and accessibility checks remain outstanding.
@@ -141,11 +443,40 @@ committed diff, independent of current staged/working-tree edits.
 Root commits are compared with an empty tree; merge commits use their first parent.
 Renames retain both paths, including non-UTF-8 paths on Unix. External diff and
 textconv helpers are disabled. Commit message previews are limited to 64 KiB and
-committed diff previews to 256 KiB. These are display limits; Git output is currently
-read into memory before preview truncation. Large-repository virtualization and
-streamed historical diffs remain planned. Commit controls are hidden in History;
-switch to Changes to prepare a new commit. Resting layouts have been visually
-checked; interactive history navigation QA remains outstanding.
+committed diff previews to 256 KiB of raw output, plus a truncation marker; UTF-8
+replacement during display can increase the rendered byte size.
+
+On Unix, each historical Git child has a 30-second deadline and a 16 KiB stderr
+cap. Complete metadata is limited to 1 MiB per page/detail read; changed-file lists
+to 4 MiB and 10,000 files. Oversized structured results fail rather than returning
+an incomplete list. Message/patch readers retain only the prefix and drain/discard
+the rest until EOF, checking the final exit status before displaying a preview.
+Selecting a diff does not reread the commit body. These bounds cover captured
+output and command lifetime, not Git's own internal memory. Process-group cleanup
+also covers inherited pipes; this path is tested on Linux.
+
+Windows still buffers whole output before checking metadata/display limits and
+has no equivalent per-read deadline (PLAT-01). Large-repository virtualization
+remains planned. Commit controls are hidden in History; switch to Changes to
+prepare a new commit. Resting layouts have been visually checked; interactive
+history navigation QA remains outstanding.
+
+## UI transition modules
+
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 91 message
+variants to typed events in ten domain handlers: application/navigation,
+repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
+stashes and completion/refresh. Guard failures explicitly match the relevant
+events; adding an unhandled variant fails compilation. Worker callbacks continue
+to return application messages. Successful large response payloads are boxed at
+the internal routing boundary without cloning their data.
+
+Domain helpers live with their handlers. Completion/refresh handling centralizes
+draft updates, review invalidation and snapshot refresh. The existing 82 state
+tests cover busy guards, drafts, confirmations, failures and transfer freshness.
+The refactor's offline smoke run produced eleven captures at 960×640 with unchanged
+fixture data; this does not prove full interactive QA. The branch deletion-review
+capture exposes right-edge button clipping tracked as UI-03.
 
 ## Development checks
 
@@ -156,9 +487,9 @@ Prettier and ESLint configuration. Install those tools from the existing lockfil
 npm ci --ignore-scripts --no-audit --no-fund
 npm run lint:fix
 npm run lint
-cargo fmt --all -- --check
-cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo test --locked --workspace
+python3 script/check_rust.py
+# With dependencies already cached:
+python3 script/check_rust.py --offline
 ```
 
 The `--ignore-scripts` install is sufficient for lint and avoids Electron downloads,
@@ -168,6 +499,16 @@ original Electron app; follow its development guide for that. `target/` and gene
 separate job using the same install command.
 
 ## Rebase linear local history
+
+Replay review accepts at most 1,000 candidate commits. Plans above that limit fail
+before execution; existing sequencer metadata above the supported count must be
+managed with Git. Collision checks allow at most 10,000 path records and 8 MiB of
+combined raw path output, with 4 MiB per subprocess stream. Repeated paths count
+again across streams; complete target trees are included, so the review limits
+also apply to fast-forward and recovery checks. Individually valid streams cannot
+silently exceed the combined budget. These bounds do not add a deadline to the
+mutating rebase process or one overall deadline to filesystem checks.
+
 
 Select a local branch, then Preview rebase to review the candidate commits and the
 exact target commit. Already-based history is left alone, a direct ancestor can
@@ -185,7 +526,10 @@ is a commit-list review, not a prediction that every replay will be conflict-fre
 A paused rebase is detected from Git's worktree-specific metadata after refresh or
 reopening. Resolve text conflicts using Review conflict and Mark resolved, then
 Continue rebase. The ordinary Commit action is blocked while rebasing. Continue
-preserves the original messages without launching a terminal editor. Abort rebase
+preserves messages for replayed commits without launching a terminal editor. If
+a conflicted commit is resolved entirely to rebased-onto contents, no patch remains
+and Git can omit that commit. This differs from preserving clean replay commits
+that start empty or become empty without conflict. Abort rebase
 requires confirmation, returns to the original branch and discards resolution edits.
 Original branch movement, stale index/HEAD/sequencer state and ignored or untracked
 checkout collisions stop the action. Collision checks also include intermediate
@@ -235,6 +579,47 @@ checks include start/separator/end lines and diff3 base lines, using the effecti
 `conflict-marker-size` attribute. Marker-like lines are treated conservatively;
 files containing intentional marker examples may require staging with Git instead.
 
+Preview ours / Preview theirs reads the immutable stage-2/stage-3 blob for a
+still-unmerged regular-file path. A missing side is shown as deletion; blobs with
+NUL bytes show size only, while other contents use a lossy UTF-8 text prefix up to
+64 KiB of raw bytes. Complete blob reads are capped at 8 MiB and index-side
+metadata at 64 KiB, using the shared Unix read deadline/output policy. Symlink,
+submodule and ambiguous renamed conflict sides remain unsupported.
+
+Git stage semantics are retained: during rebase, ours is the rebased-onto side and
+theirs is the replayed commit. Previews show the full blob ID and executable flag,
+recheck index/HEAD/status after reading, and clear the old resolution review.
+They are read-only, do not bind the current working-file contents, and cannot be
+used to apply a choice or enable Mark resolved.
+
+Choose ours / Choose theirs prepares a separate review of both the current working
+file and the selected index blob or deletion. Apply choice explicitly confirms
+replacement/deletion and staging of that path; Cancel choice discards the review.
+The review binds complete contents and executable mode (up to 8 MiB), index/HEAD,
+sequencer state, effective attributes and relevant checkout/staging settings.
+Changes to these inputs require a new review. Selection, navigation and refresh
+clear the pending choice; busy controls cannot start another write. Draft commit
+messages remain intact.
+
+Supported write statuses are UU, AA, UD and DU: regular text with unresolved
+markers, NUL-containing binary blobs, add/add and modify/delete sides. AU, UA and
+DD require external Git for side writes; an absent stage alone cannot authorize
+deletion in those more complex states. Read-only side previews remain available. Marker-free UU/AA text is treated
+as externally resolved and must use the existing review/stage workflow below.
+Filters, text/EOL, ident, working-tree encoding and automatic line-ending
+conversions are conservatively refused. Symlinks, submodules, ambiguous renames
+and larger blobs require external Git. This is a scoped implementation of G-05;
+the complete upstream status/caller/test audit remains open.
+
+Applying uses Git checkout with the selected side followed by add, or Git rm for
+a deleted side, with literal native paths and no force flag. Configured checkout
+hooks remain active. The final index entry must match the reviewed blob/mode or
+absence. These operations are not atomic against external clients. A checkout,
+hook or staging failure can leave the working file changed: the app reports the
+failure and refreshes; inspect the file/index before recovery. Errors from later
+policy/metadata reads also warn that the working file/index may have changed. It does not roll
+back over subsequent edits or automatically continue a merge/rebase.
+
 Mark reviewed file resolved stages only that file after rechecking its contents,
 executable mode, index, HEAD and marker settings. Locally deleted files can be
 reviewed and staged as a deletion. The action does not rewrite files, choose ours
@@ -243,8 +628,8 @@ conflicts are resolved, use the existing commit form; a merge started outside th
 app keeps its merge parents. A stash conflict can be resolved and committed while
 the saved stash remains available.
 
-Binary files, symlinks, submodules and files above 8 MiB still need an external Git
-tool. The UI does not yet edit conflict blocks or offer interactive rebase.
+External binary editing, symlinks, submodules and files above 8 MiB still need an
+external Git tool; supported binary side choices use the separate confirmation above. The UI does not yet edit conflict blocks or offer interactive rebase.
 The checks are preflight validation, not a transaction against concurrent external
 filesystem edits. Visual QA and an integrated conflict editor remain outstanding.
 
@@ -268,7 +653,12 @@ local writes and do not fence concurrent external edits.
 ## Create a local repository
 
 Enter a project folder in the Create repository form and optionally an initial
-branch name (default `main`). The parent must already exist. The app can create a
+branch name. An explicit name wins; when the field is blank, the worker reads
+global Git `init.defaultBranch` and uses `main` only when the setting is absent.
+During preference resolution, malformed/invalid/empty/non-UTF-8/oversized settings
+and lookup failures are reported before creating a destination. Values are validated as literal branch names,
+without trimming an invalid value into a fallback. Global configuration is read
+only. The parent must already exist. The app can create a
 new folder or initialize an existing folder containing ordinary project files.
 Project files are preserved and left untracked; no README, ignore file, license or
 initial commit is generated automatically. After creation the repository opens in
@@ -282,7 +672,13 @@ and form inputs; newly created folders or metadata may remain for inspection.
 Concurrent external filesystem changes are not a transaction with this preflight.
 Git commands ignore inherited repository-routing variables such as `GIT_DIR`,
 `GIT_WORK_TREE` and `GIT_INDEX_FILE`, while keeping normal identity, helper and SSH
-configuration. Initialization is tested end-to-end through the first staged commit;
+configuration. Before reserving metadata, initialization scans destination
+ancestors for `.git` entries and conservative bare/separate Git layouts (HEAD,
+objects and refs/reftable/packed-refs markers), without interpreting Git failures
+as repository absence. Broken/symlinked markers are protected and filesystem
+errors propagate. An ordinary project file named HEAD alone remains valid.
+These checks do not fence concurrent external filesystem changes.
+Initialization is tested end-to-end through the first staged commit;
 the resting Create / Clone panel has been visually checked, but interactive UI QA remains outstanding.
 
 ## Clone and remotes
@@ -365,8 +761,8 @@ Launch-time repository inspection is read-only and happens before window creatio
 Interactive repository operations continue to use worker threads.
 
 A repeatable offline fixture captures all seven panels, a read-only branch
-deletion review and missing-Git diagnostics without touching a real project
-or contacting a remote:
+deletion review, missing-Git diagnostics and Unix timeout/output-overflow cases
+without touching a real project or contacting a remote:
 
 ```sh
 cargo build --locked -p desktop-rust
@@ -377,8 +773,9 @@ python3 script/rust-ui-smoke.py --output /tmp/fresh-ui-960 --size 960x640
 Each output directory must be new. The script requires a graphical session,
 uses the software renderer unless `ICED_BACKEND` is set, creates and removes a
 temporary repository, and checks that its working files, config, status, refs and
-index remain unchanged. PNGs and `report.json` are local review artifacts, not
-committed baselines. Compare the images manually: capture success alone does not
+index remain unchanged. Raw PNGs and `report.json` are local review artifacts.
+A small curated set may be committed as milestone review evidence, never as
+automated pixel baselines. Compare the images manually: capture success alone does not
 establish visual correctness. Automated CI currently runs state tests, not captures.
 
 On 2026-11-24, all six basic panels were captured and visually inspected on Linux
@@ -386,6 +783,12 @@ at 1200×800 and 960×640 using the software renderer. This covers the resting
 layouts with sample changes, history, remote configuration and a stash. Keyboard
 navigation, focus, IME, HiDPI, accessibility, other renderers/platforms, long-list
 scrolling and complete interactive write/conflict flows remain unverified.
+
+For complete manual flows, use [Linux alpha acceptance](rust/alpha-acceptance.md).
+`script/rust-ui-fixture.py` prepares four persistent offline repositories and can
+launch each with isolated Git configuration. Preparation and read-only inspection
+are verified; actual interactive acceptance remains pending. The current
+[consolidation milestone](rust/consolidation.md) freezes feature growth for review.
 
 ## Stable upstream maintenance
 
@@ -413,7 +816,8 @@ Changes for features not yet available remain deferred against that milestone.
 Advance `analyzed` only after classification; advance `parity` only after all
 applicable changes for supported features have passed verification.
 
-Port behaviors in separate PRs rather than merging TypeScript into Rust.
+Port behaviors as independently reviewable commits in coherent milestone batches,
+with one PR per batch. Keep the TypeScript reference source separate from Rust ports.
 Prioritize data loss, credential issues and security fixes outside the weekly cycle.
 Follow AGENTS.md and the prepare-team-pr skill for team-authored PR preparation.
 
@@ -446,11 +850,11 @@ if unattended availability is required.
 The preview now supports local initialization, stage/unstage, commit, and branch
 creation/switching.
 Clone, fetch, fast-forward pull, push and upstream setup are implemented as a
-prototype. Renaming the current committed branch and deleting merged local
-branches with confirmation are supported. Renaming other
-selected branches, force deletion and in-app authentication remain planned.
-Diff rendering is plain monospaced text; syntax highlighting, hunk selection,
-large-diff virtualization and interactive conflict resolution remain planned.
+prototype. Current/selected local branch rename, creation at a history commit and
+deleting merged local branches with confirmation are supported. Force deletion
+and in-app authentication remain planned. Diff rendering is monospaced text with
+scoped whole-hunk and individual-line staging/unstaging; syntax highlighting,
+large-diff virtualization and full interactive conflict editing remain planned.
 Automated Git integration tests cover staged/unstaged changes, unborn branches,
 rename, deletion, binary files, conflicts, literal pathspecs and non-UTF-8 paths.
 Git tests also cover branch creation/switching, detached and unborn HEAD, invalid

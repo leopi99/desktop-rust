@@ -1,3 +1,6 @@
+//! Git integration coverage for initialization.
+#![cfg(test)]
+
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -207,4 +210,186 @@ fn inherited_git_environment_cannot_redirect_initialization() {
     assert_eq!(std::fs::read(decoy.join("HEAD")).unwrap(), before);
     assert!(!area.0.join("foreign-index").exists());
     assert!(area.0.join("project/.git/HEAD").is_file());
+}
+
+#[test]
+fn damaged_bare_metadata_and_its_children_are_never_initialized() {
+    let area = Area::new();
+    git(
+        &area.0,
+        &["init", "--bare", "--initial-branch=main", "bare"],
+    );
+    let bare = area.0.join("bare");
+    std::fs::write(bare.join("HEAD"), b"damaged HEAD\n").unwrap();
+    let head = std::fs::read(bare.join("HEAD")).unwrap();
+    assert!(desktop_git::init_repository(&bare, "other").is_err());
+    assert!(desktop_git::init_repository(&bare.join("objects/new-project"), "main").is_err());
+    assert!(!bare.join(".git").exists());
+    assert!(!bare.join("objects/new-project").exists());
+    assert_eq!(std::fs::read(bare.join("HEAD")).unwrap(), head);
+}
+
+#[test]
+fn ordinary_head_named_project_file_is_preserved_during_initialization() {
+    let area = Area::new();
+    let project = area.0.join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(project.join("HEAD"), b"ordinary project file\n").unwrap();
+    desktop_git::init_repository(&project, "main").unwrap();
+    assert_eq!(
+        std::fs::read(project.join("HEAD")).unwrap(),
+        b"ordinary project file\n"
+    );
+    assert!(desktop_git::snapshot(&project)
+        .unwrap()
+        .commit_basis
+        .head
+        .is_none());
+}
+
+fn preference_child(root: &Path) {
+    let config = root.join("global-config");
+    let before = if config.exists() {
+        Some(std::fs::read(&config).unwrap())
+    } else {
+        None
+    };
+    let destination = root.join("preferred-project");
+    let branch = std::env::var("DESKTOP_INIT_PREF_OVERRIDE").ok();
+    let result = desktop_git::init_repository_with_default_branch(&destination, branch.as_deref());
+    match std::env::var("DESKTOP_INIT_PREF_EXPECTED") {
+        Ok(expected) => {
+            let project = result.unwrap();
+            assert_eq!(
+                git(&project, &["symbolic-ref", "--short", "HEAD"]),
+                format!("{expected}\n").as_bytes()
+            );
+            assert!(!project.join(".git/index").exists());
+        }
+        Err(_) => {
+            assert!(result.is_err());
+            assert!(
+                !destination.exists(),
+                "Failed preference lookup/validation must not reserve destination metadata"
+            );
+        }
+    }
+    match before {
+        Some(bytes) => assert_eq!(std::fs::read(&config).unwrap(), bytes),
+        None => assert!(!config.exists()),
+    }
+}
+
+fn preference_case(
+    test: &str,
+    config: Option<&[u8]>,
+    branch: Option<&str>,
+    expected: Option<&str>,
+    missing_git: bool,
+) {
+    let area = Area::new();
+    let config_path = area.0.join("global-config");
+    if let Some(bytes) = config {
+        std::fs::write(&config_path, bytes).unwrap();
+    }
+    let mut child = Command::new(std::env::current_exe().unwrap());
+    child
+        .args(["--exact", test, "--nocapture"])
+        .current_dir(&area.0)
+        .env("DESKTOP_INIT_PREF_ROOT", &area.0)
+        .env("GIT_CONFIG_GLOBAL", &config_path)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_CONFIG_PARAMETERS")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("DESKTOP_INIT_PREF_OVERRIDE")
+        .env_remove("DESKTOP_INIT_PREF_EXPECTED");
+    if let Some(branch) = branch {
+        child.env("DESKTOP_INIT_PREF_OVERRIDE", branch);
+    }
+    if let Some(expected) = expected {
+        child.env("DESKTOP_INIT_PREF_EXPECTED", expected);
+    }
+    if missing_git {
+        child.env("PATH", area.0.join("missing-tools"));
+    }
+    let output = child.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn preferred_initial_branch_uses_global_setting_or_explicit_override() {
+    if let Some(root) = std::env::var_os("DESKTOP_INIT_PREF_ROOT") {
+        preference_child(Path::new(&root));
+        return;
+    }
+    let test = "preferred_initial_branch_uses_global_setting_or_explicit_override";
+    preference_case(test, None, None, Some("main"), false);
+    preference_case(
+        test,
+        Some(b"[init]\ndefaultBranch = trunk\n"),
+        None,
+        Some("trunk"),
+        false,
+    );
+    preference_case(
+        test,
+        Some("[init]\ndefaultBranch = équipe/défaut\n".as_bytes()),
+        None,
+        Some("équipe/défaut"),
+        false,
+    );
+    preference_case(
+        test,
+        Some(b"[init]\ndefaultBranch = first\ndefaultBranch = latest\n"),
+        None,
+        Some("latest"),
+        false,
+    );
+    preference_case(
+        test,
+        Some(b"[init]\ndefaultBranch = trunk\n"),
+        Some("topic/explicit"),
+        Some("topic/explicit"),
+        false,
+    );
+    let huge = format!("[init]\ndefaultBranch = {}\n", "p".repeat(70_000));
+    preference_case(
+        test,
+        Some(huge.as_bytes()),
+        Some("topic/explicit"),
+        Some("topic/explicit"),
+        false,
+    );
+}
+
+#[test]
+fn failed_initial_branch_preferences_never_create_destination_or_fall_back() {
+    if let Some(root) = std::env::var_os("DESKTOP_INIT_PREF_ROOT") {
+        preference_child(Path::new(&root));
+        return;
+    }
+    let test = "failed_initial_branch_preferences_never_create_destination_or_fall_back";
+    for config in [
+        b"[init\n".as_slice(),
+        b"[init]\ndefaultBranch =\n",
+        b"[init]\ndefaultBranch = bad..name\n",
+        b"[init]\ndefaultBranch = \xff\n",
+    ] {
+        preference_case(test, Some(config), None, None, false);
+    }
+    let huge = format!("[init]\ndefaultBranch = {}\n", "p".repeat(70_000));
+    preference_case(test, Some(huge.as_bytes()), None, None, false);
+    preference_case(test, None, None, None, true);
+    preference_case(
+        test,
+        Some(b"[init]\ndefaultBranch = trunk\n"),
+        Some(""),
+        None,
+        false,
+    );
 }
