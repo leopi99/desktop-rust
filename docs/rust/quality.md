@@ -110,6 +110,10 @@ Form inputs in reused view slots use `focus_region::field` with a typed `FieldId
 for their purpose/panel context. Keep identities independent of editable draft
 text; shared draft storage does not imply the same input context. Preserve native
 edit state on ordinary redraws and reset it when the slot changes purpose.
+Controls that select within or dismiss a review bind focus and armed gestures to
+the exact immutable review instance, not label/path/content equality. Reset that state
+when the review changes or the control is disabled. Keyboard dismissal respects
+busy/panel guards and cannot substitute for transfer cancellation or Git abort.
 
 ## Updating the policy
 

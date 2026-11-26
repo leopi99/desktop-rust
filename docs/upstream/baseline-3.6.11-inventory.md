@@ -650,3 +650,28 @@ This preview opens a diff when activating a file button. It does not implement
 upstream keyboard inclusion toggling, multi-selection, roving list focus,
 filtering or full list accessibility. Native keyboard/IME/HiDPI/accessibility
 execution and UI-01/UI-08 remain open. No upstream checkpoint advances.
+
+## Keyboard dismissal of local review controls
+
+Selected functions in the pinned [dialog component](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/dialog/dialog.tsx)
+ignore a default-prevented key event and route Escape or the platform close
+shortcut through dialog cancellation. The dismissal callback is gated by the
+component's dismissability and appearing state. The same key handler contains
+Windows alert-dialog Tab focus workarounds. This is a targeted helper inspection;
+its callers, nested-dialog lifecycle and complete tests are not audited here.
+
+The Rust preview adds focusable close/cancel buttons for hunk reviews and explicit
+conflict-side choices. Their focus/armed state uses exact review-Arc identity;
+replacing a review with equal content still cancels the gesture. Plain unhandled
+Escape routes through an exhaustive dismissal message to existing cancellation
+handlers only on idle Changes. It clears the applicable review/selection and
+preserves drafts; it does not request transfer cancellation or merge/rebase abort.
+Seven new real-widget/subscription/state regressions cover traversal, repeat/redraw,
+review replacement including pending mouse/touch releases, captured/modified/released keys, busy/all-panel guards and
+preserved unrelated state. Existing navigation tests retain their module paths
+when moved out of the production module.
+
+This does not implement modal focus trapping, nested dialog ownership, close
+shortcuts, upstream appearance timing, arbitrary popup dismissal or native
+accessibility. UI-01/UI-09 and full baseline analysis remain open; no checkpoint
+advances.

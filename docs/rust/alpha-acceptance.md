@@ -80,6 +80,7 @@ status alone as proof that the right content was committed.
 | Field identity/handover | Current inputs have typed purpose/context IDs. Automated widget/event checks cover redraw preservation, retarget/reorder reset and blocked typing into a replacement field. Native panel transitions and restoration across removed fields remain pending. |
 | Hunk/line checkbox keyboard selection | Implemented; five automated widget/event regressions cover Tab traversal, Space release/repeats, exact-review/coordinate invalidation, interruption and selection-only delivery. Enter does not apply or toggle. Actual native keyboard/accessibility execution remains pending. |
 | Changed-file/read-review keyboard navigation | Implemented; five new real-widget/event regressions cover read-only actions, identity handover, native paths, pointer/touch, busy delivery and draft/review rules. File diff, hunk review and conflict previews are reachable through Tab and Enter/Space; write actions remain separate. Actual native A-01–A-03 execution remains pending. |
+| Review dismissal from keyboard | Close hunk review/Cancel choice support Tab and Enter/Space with exact-review identity. Otherwise unhandled plain Escape dismisses only an applicable idle Changes review; busy/other-panel guards and draft/operation preservation have seven new automated regressions. Native keyboard interaction, focus restoration and accessibility remain pending. |
 | Native Windows/macOS, full accessibility/IME/HiDPI verification | Not run. |
 
 ## Alpha exit conditions

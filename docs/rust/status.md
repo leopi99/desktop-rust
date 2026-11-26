@@ -207,6 +207,40 @@ controls and complete interaction/accessibility QA remain open. Upstream list
 inclusion/multi-selection semantics are not ported by this change; no checkpoint
 advances.
 
+### Keyboard dismissal and review identity
+
+Increment [c3b19fab1b](https://github.com/leopi99/desktop-rust/commit/c3b19fab1ba5f451aab8ea2ad8af69e007ddb1d0): Close hunk review and Cancel choice use focusable navigation controls with
+Tab/Shift+Tab and single Enter/Space release activation. Their target is the exact
+immutable review Arc: equal-content replacements reset focus/armed state. The
+shared navigation widget also recreates its inner button state when a target
+changes or becomes disabled, preventing mouse/touch releases from activating a
+replacement. Ordinary same-target redraws preserve keyboard and pointer gestures.
+
+Plain otherwise unhandled Escape adds one exhaustively routed UI message (93 root
+messages). It delegates to existing hunk/side-choice cancellation handlers only on
+idle Changes; absent reviews, busy operations, other panels and captured/modified
+or released keys do not dismiss. Hunk selection clears with its review; drafts,
+snapshot and unrelated operation state survive. No transfer cancellation,
+merge/rebase abort or Git write is inferred. No Git adapter/dependency changes.
+
+Seven new real-widget/subscription/state regressions exercise traversal, held keys,
+redraw/review replacement, pointer/touch releases, Escape event filtering,
+busy/all-panel guards and preserved drafts/other operation state. Existing
+navigation tests move to a separate test module with their names retained; the
+Rust quality guide records the review-identity rule as a code-review obligation.
+The final full gate passes 448 Rust tests (147 UI), 10 compiler/policy tests,
+formatter, all-target/all-feature Clippy and warning-free rustdoc. The registry
+validator, all 32 upstream tests and npm lint pass. Logs use the prefix
+`/tmp/desktop-rust-review-dismiss-`; the final Rust gate is `final-gate.log`.
+
+The final eight-panel/three-diagnostic smoke passes at 960×640 with unchanged data
+(`/tmp/desktop-rust-review-dismiss-final-smoke-960`). Final own-window hunk and
+conflict-choice captures at 960×640 and 1200×800 were visually inspected, with
+unchanged file/index/config/status/ref signatures
+(`/tmp/desktop-rust-review-dismiss-final-captures-bd3xxyvi`). These are resting
+captures, not native keyboard execution. UI-01/UI-09, focus restoration after
+removal and full accessibility/IME/HiDPI remain open; no upstream checkpoint moves.
+
 ## Merged batch: Rust quality and process hardening
 
 Branch: `quality/rust-foundations`, merged through PR #9. The batch included:

@@ -774,6 +774,15 @@ key, disabling, or changing the exact review/coordinate cancels the gesture.
 Ordinary redraws retain focus for the same review coordinate. Selection only
 updates the review: use the separate Stage/Unstage action to apply it.
 
+The Close hunk review and Cancel choice buttons also participate in Tab traversal;
+Enter/Space dismisses only the review associated with that exact control. Changing
+the review instance cancels focus and any armed dismissal, even when its content
+is equal. Plain, otherwise unhandled Escape dismisses a hunk review or side-choice
+confirmation only on an idle Changes panel. Other modifiers, captured key events,
+other panels and busy operations are ignored. With no applicable review it is a
+no-op. Escape never requests transfer cancellation or merge/rebase abort. Closing
+a hunk review clears its hunk/line selection while preserving commit drafts.
+
 After a focus move, the focused field or sidebar control is brought into view
 through its own scroll containers with the minimum clamped adjustment. Nested
 containers are handled from the inside out. Other panes and already visible
