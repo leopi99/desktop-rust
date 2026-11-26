@@ -261,6 +261,36 @@ drafts. Hunk unstaging, line/multiple selection, conversion/special-file support
 full upstream formatter/test audit and interactive/platform QA remain open. This
 is a scoped G-02 increment, not feature/release parity.
 
+## Partial staging: reverse index-only hunk operation
+
+Additional pinned excerpts inspected:
+[ordinary commit index reset/rebuild](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/commit.ts),
+[partial selection pass in stageFiles](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/update-index.ts)
+and [whole-index unstage helper](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/reset.ts).
+Upstream ordinary commit clears the index and stages its selected files/lines;
+stageFiles routes partial selections to the previously inspected patch helper.
+Its merge-commit path explicitly preserves existing staging. These observations
+are not evidence of a dedicated upstream reverse-hunk UI/API, nor a complete audit
+of all commit/selection callers. Rust's separate explicit index/working views
+remain a scoped design difference: the Rust commit action preserves and commits
+the staged index instead of reconstructing it from the upstream selection model.
+
+Rust [4d69c67a06](https://github.com/leopi99/desktop-rust/commit/4d69c67a06905b8fc5daa421d7a3f6756c649f08) adds a staged-side review of HEAD-to-index changes and uses
+reverse cached apply for exactly one context-bearing block. The review binds the
+comparison direction; the stage and unstage APIs and UI reject the opposite side.
+Both directions share parsing, bounds, complete freshness and index-only execution.
+Only existing regular text modifications with a present supported working file
+are included; staged adds/deletes/renames/mode changes, special/binary files and
+conversion policies remain excluded. No checkout, global index reset, force,
+three-way fallback or automatic rollback is requested.
+
+New regressions verify both block choices and commit of the remainder, shifted
+reverse coordinates, extra unstaged edits and other staged files, opposite/forged
+reviews, stale inputs, index locks, patch/hunk bounds and native/EOF/CRLF/empty-file
+bytes. UI/capture tests verify directional authority, guarded actions and invalidation.
+Line/multiple selection, complete upstream selection/commit semantics, broader
+formats and interactive/platform QA remain open; no parity checkpoint changes.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -270,7 +300,7 @@ Feature identifiers match `upstream/features.json`.
 | --- | --- | --- |
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
-| stage-commit | Partial complete-hunk apply/formatter/test inspection | Line/multiple selection, hunk unstaging, broader formats, index/commit contracts and full original tests. |
+| stage-commit | Partial complete-hunk apply/formatter/test inspection | Line/multiple selection, broader formats, full index/commit selection contracts and original tests. |
 | repository-read, diff, commit-history | Pending full inventory | Status/diff/history contracts, parsing, limits and original tests. |
 | branches, stash | Partial rename and commit-based creation slices; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |

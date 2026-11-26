@@ -34,7 +34,7 @@ All eight are merged. Independent prototype features do not imply release parity
 | Area | Implemented and checked | Remaining boundary |
 | --- | --- | --- |
 | Workspace | core/Git/Iced split; Cargo lockfile; Rust/npm CI | Quality policy in the current batch still needs its batch merge. |
-| Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, scoped single-hunk staging, commits | Hunk unstaging, line/multiple-hunk selection, broader formats, large-repository virtualization and richer rendering. |
+| Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, scoped single-hunk staging/unstaging, commits | Line/multiple-hunk selection, broader formats, large-repository virtualization and richer rendering. |
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
@@ -88,7 +88,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 340 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 350 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -206,6 +206,20 @@ capture requirements. Two-block review and normal Changes captures at 960×640 a
 `/tmp/desktop-rust-hunks-review-dwk8i4xf`. The minimum-size general panel smoke also
 passed with unchanged fixtures (`/tmp/desktop-rust-hunks-smoke-960`). No button-click/accessibility or
 cross-platform parity is claimed. Line selection and hunk unstaging remain open.
+Single-hunk unstaging ([4d69c67a06](https://github.com/leopi99/desktop-rust/commit/4d69c67a06905b8fc5daa421d7a3f6756c649f08), 2026-11-26) passed 350 Rust tests,
+including 99 UI state/capture-option tests, plus 32 upstream and 10 compiler/policy
+tests and formatter/Clippy/rustdoc/npm lint. Seven additional Git regressions cover
+either staged block then commit, divergent working edits and other staged files,
+reverse coordinates after insertions, direction/forgery refusal, stale input and
+lock failure, hard bounds/unsupported types and exact native-path/EOF/CRLF/empty-file
+preservation. Two UI regressions cover direction-specific authority, busy and
+navigation guards, refresh and drafts; another checks staged capture requirements.
+Both review directions and normal Changes were captured at 960×640 and 1200×800
+with an unchanged mixed-index fixture (`/tmp/desktop-rust-unstage-hunk-review-1_oe0g3b`); staged reviews were
+visually inspected at both sizes. The general minimum-size smoke passed with
+unchanged fixtures (`/tmp/desktop-rust-unstage-hunk-smoke-960`). These are not
+interactive/accessibility or native platform results. The source inventory records
+the difference from upstream's selection-aware index rebuild; parity stays unset.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.
