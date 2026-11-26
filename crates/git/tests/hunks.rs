@@ -300,6 +300,7 @@ fn symlinks_mode_changes_and_pure_renames_do_not_produce_hunk_write_reviews() {
                 std::fs::set_permissions(f.file(), std::fs::Permissions::from_mode(0o755)).unwrap()
             }
             _ => {
+                std::fs::write(f.file(), contents(&[])).unwrap();
                 f.git(&["mv", "--", "file", "renamed"]);
             }
         }
@@ -310,6 +311,10 @@ fn symlinks_mode_changes_and_pure_renames_do_not_produce_hunk_write_reviews() {
             .iter()
             .find(|c| c.path == f.name || c.path == Path::new("renamed"))
             .unwrap();
+        if kind == "rename" {
+            assert_eq!(change.index, 'R');
+            assert_eq!(change.worktree, ' ');
+        }
         assert!(
             desktop_git::review_hunks(&f.root, change).is_err(),
             "{kind}"
