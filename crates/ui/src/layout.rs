@@ -416,11 +416,15 @@ impl Desktop {
                     review.side,
                     review.change.path.display()
                 )),
-                text("Select blocks; the working file stays unchanged."),
+                text("Select blocks or changed lines; the working file stays unchanged."),
                 close
             ]
             .spacing(8)
             .width(Length::Fill);
+            let line_controls = review.line_selection_available();
+            if !line_controls {
+                contents=contents.push(text("Line controls need at most 64 KiB and 1,024 changed rows. Whole hunks remain available.").size(14));
+            }
             for (index, hunk) in review.hunks.iter().enumerate() {
                 let (label, message) = match review.side {
                     crate::HunkSide::Unstaged => ("Stage", Message::StageHunk(index)),
@@ -438,20 +442,52 @@ impl Desktop {
                     selection =
                         selection.on_toggle(move |selected| Message::ToggleHunk(index, selected));
                 }
-                contents = contents
-                    .push(text(hunk).font(iced::Font::MONOSPACE))
-                    .push(selection)
-                    .push(stage);
+                if line_controls && !hunk.lines().any(|row| row.starts_with("\\ No newline")) {
+                    for (line, row) in hunk.split_inclusive('\n').enumerate() {
+                        if matches!(row.as_bytes().first(), Some(b'+' | b'-')) {
+                            let coordinate = crate::HunkLine { hunk: index, line };
+                            let checked = self.selected_hunks.contains(&index)
+                                || self.selected_lines.contains(&coordinate);
+                            let mut choose = checkbox(row.trim_end_matches(['\r', '\n']), checked)
+                                .font(iced::Font::MONOSPACE);
+                            if !self.loading {
+                                choose = choose.on_toggle(move |selected| {
+                                    Message::ToggleHunkLine(coordinate, selected)
+                                });
+                            }
+                            contents = contents.push(choose);
+                        } else {
+                            contents = contents.push(
+                                text(row.trim_end_matches(['\r', '\n']))
+                                    .font(iced::Font::MONOSPACE),
+                            );
+                        }
+                    }
+                } else {
+                    contents = contents.push(text(hunk).font(iced::Font::MONOSPACE));
+                    if line_controls {
+                        contents = contents.push(
+                            text("Use the whole hunk when the final newline is missing.").size(14),
+                        );
+                    }
+                }
+                contents = contents.push(selection).push(stage);
             }
             let label = match review.side {
                 crate::HunkSide::Unstaged => "Stage",
                 crate::HunkSide::Staged => "Unstage",
             };
-            let mut apply = button(text(format!(
-                "{label} selected ({})",
-                self.selected_hunks.len()
-            )));
-            if !self.loading && !self.selected_hunks.is_empty() {
+            let action = if self.selected_lines.is_empty() {
+                format!("{label} selected ({})", self.selected_hunks.len())
+            } else {
+                format!(
+                    "{label} selected lines ({})",
+                    self.combined_hunk_lines(review).len()
+                )
+            };
+            let mut apply = button(text(action));
+            if !self.loading && (!self.selected_hunks.is_empty() || !self.selected_lines.is_empty())
+            {
                 apply = apply.on_press(Message::ApplySelectedHunks(review.side));
             }
             column![

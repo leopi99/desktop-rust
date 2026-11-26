@@ -73,6 +73,9 @@ impl Desktop {
             Message::StageHunk(index) => {
                 self.update_changes(changes::Event::StageHunk(index, crate::HunkSide::Unstaged))
             }
+            Message::ToggleHunkLine(line, selected) => {
+                self.update_changes(changes::Event::ToggleHunkLine(line, selected))
+            }
             Message::ToggleHunk(index, selected) => {
                 self.update_changes(changes::Event::ToggleHunk(index, selected))
             }

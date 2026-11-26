@@ -13,7 +13,8 @@ mod runtime;
 pub use runtime::git_runtime;
 mod hunks;
 pub use hunks::{
-    review_hunks, review_staged_hunks, stage_hunk, stage_hunks, unstage_hunk, unstage_hunks,
+    review_hunks, review_staged_hunks, stage_hunk, stage_hunks, stage_lines, unstage_hunk,
+    unstage_hunks, unstage_lines,
 };
 mod history;
 mod init;

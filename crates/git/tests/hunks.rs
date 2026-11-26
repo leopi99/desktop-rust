@@ -1,6 +1,6 @@
 //! Behavioral coverage for complete hunk reviews and index-only partial staging.
 #![cfg(test)]
-use desktop_core::FileChange;
+use desktop_core::{FileChange, HunkLine};
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
@@ -699,5 +699,365 @@ fn multi_hunk_native_paths_and_crlf_bytes_are_preserved_in_both_directions() {
         desktop_git::unstage_hunks(&staged, &[1, 0]).unwrap();
         assert_eq!(f.index(), base.as_bytes());
         assert_eq!(std::fs::read(f.file()).unwrap(), work.as_bytes());
+    }
+}
+
+fn row(review: &desktop_core::HunkReview, text: &str) -> HunkLine {
+    review
+        .hunks
+        .iter()
+        .enumerate()
+        .find_map(|(hunk, body)| {
+            body.split_inclusive('\n')
+                .position(|line| line == text)
+                .map(|line| HunkLine { hunk, line })
+        })
+        .unwrap()
+}
+
+#[test]
+fn individual_replacement_additions_and_deletions_have_explicit_index_semantics() {
+    for staged in [false, true] {
+        for choice in ["addition", "deletion", "both"] {
+            let f = Fixture::new("file", b"before\nold\nend\n", b"before\nnew\nend\n");
+            if staged {
+                f.git(&["add", "--all"]);
+            }
+            let review = if staged {
+                desktop_git::review_staged_hunks(&f.root, &f.change())
+            } else {
+                desktop_git::review_hunks(&f.root, &f.change())
+            }
+            .unwrap();
+            let add = row(&review, "+new\n");
+            let delete = row(&review, "-old\n");
+            let selection = match choice {
+                "addition" => vec![add],
+                "deletion" => vec![delete],
+                _ => vec![delete, add],
+            };
+            if staged {
+                desktop_git::unstage_lines(&review, &selection).unwrap();
+            } else {
+                desktop_git::stage_lines(&review, &selection).unwrap();
+            }
+            let expected = match (staged, choice) {
+                (false, "addition") | (true, "deletion") => b"before\nold\nnew\nend\n".as_slice(),
+                (false, "deletion") | (true, "addition") => b"before\nend\n",
+                (false, _) => b"before\nnew\nend\n",
+                _ => b"before\nold\nend\n",
+            };
+            assert_eq!(f.index(), expected);
+            assert_eq!(std::fs::read(f.file()).unwrap(), b"before\nnew\nend\n");
+        }
+    }
+}
+
+#[test]
+fn selected_line_pairs_within_one_hunk_preserve_other_edits_and_commit_only_the_index() {
+    for staged in [false, true] {
+        let f = Fixture::new("file", &contents(&[]), &contents(&[10, 12]));
+        if staged {
+            f.git(&["add", "--all"]);
+        }
+        std::fs::write(f.root.join("other"), b"keep staged").unwrap();
+        f.git(&["add", "--", "other"]);
+        let review = if staged {
+            desktop_git::review_staged_hunks(&f.root, &f.change())
+        } else {
+            desktop_git::review_hunks(&f.root, &f.change())
+        }
+        .unwrap();
+        assert_eq!(review.hunks.len(), 1);
+        let selection = [
+            row(&review, "-line 010\n"),
+            row(&review, "+line 010 edited\n"),
+        ];
+        if staged {
+            desktop_git::unstage_lines(&review, &selection).unwrap();
+        } else {
+            desktop_git::stage_lines(&review, &selection).unwrap();
+        }
+        let expected = contents(if staged { &[12] } else { &[10] });
+        assert_eq!(f.index(), expected);
+        assert_eq!(f.git(&["show", ":other"]), b"keep staged");
+        desktop_git::commit(&f.root, "Selected line pair", &f.basis()).unwrap();
+        assert_eq!(f.git(&["show", "HEAD:file"]), expected);
+        assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[10, 12]));
+    }
+}
+
+#[test]
+fn partial_line_counts_and_offsets_remain_correct_across_separate_hunks() {
+    let base = String::from_utf8(contents(&[])).unwrap();
+    let work = base
+        .replace("line 005\n", "line 005\ninsert A\ninsert B\n")
+        .replace("line 020\n", "line 020 edited\n")
+        .replace("line 035\n", "line 035\nlater A\nlater B\n");
+    for staged in [false, true] {
+        let f = Fixture::new("file", base.as_bytes(), work.as_bytes());
+        if staged {
+            f.git(&["add", "--all"]);
+        }
+        let review = if staged {
+            desktop_git::review_staged_hunks(&f.root, &f.change())
+        } else {
+            desktop_git::review_hunks(&f.root, &f.change())
+        }
+        .unwrap();
+        let selection = [row(&review, "+later A\n"), row(&review, "+insert A\n")];
+        if staged {
+            desktop_git::unstage_lines(&review, &selection).unwrap();
+        } else {
+            desktop_git::stage_lines(&review, &selection).unwrap();
+        }
+        let expected = if staged {
+            work.replace("insert A\n", "").replace("later A\n", "")
+        } else {
+            base.replace("line 005\n", "line 005\ninsert A\n")
+                .replace("line 035\n", "line 035\nlater A\n")
+        };
+        assert_eq!(f.index(), expected.as_bytes());
+        assert_eq!(std::fs::read(f.file()).unwrap(), work.as_bytes());
+    }
+}
+
+#[test]
+fn empty_duplicate_context_and_opposite_direction_line_selections_are_refused() {
+    for staged in [false, true] {
+        let f = Fixture::new("file", &contents(&[]), &contents(&[10, 12]));
+        if staged {
+            f.git(&["add", "--all"]);
+        }
+        let review = if staged {
+            desktop_git::review_staged_hunks(&f.root, &f.change())
+        } else {
+            desktop_git::review_hunks(&f.root, &f.change())
+        }
+        .unwrap();
+        let add = row(&review, "+line 010 edited\n");
+        let before = f.basis();
+        for selection in [
+            vec![],
+            vec![add, add],
+            vec![HunkLine { hunk: 0, line: 0 }],
+            vec![HunkLine { hunk: 0, line: 1 }],
+            vec![HunkLine { hunk: 99, line: 1 }],
+            vec![HunkLine { hunk: 0, line: 999 }],
+        ] {
+            let result = if staged {
+                desktop_git::unstage_lines(&review, &selection)
+            } else {
+                desktop_git::stage_lines(&review, &selection)
+            };
+            assert!(result.is_err());
+            assert_eq!(f.basis(), before);
+        }
+        let result = if staged {
+            desktop_git::stage_lines(&review, &[add])
+        } else {
+            desktop_git::unstage_lines(&review, &[add])
+        };
+        assert!(result.is_err());
+        assert_eq!(f.basis(), before);
+    }
+}
+
+#[test]
+fn no_newline_hunks_require_all_changed_rows_and_preserve_exact_bytes() {
+    for staged in [false, true] {
+        let f = Fixture::new("file", b"old", b"new");
+        if staged {
+            f.git(&["add", "--all"]);
+        }
+        let review = if staged {
+            desktop_git::review_staged_hunks(&f.root, &f.change())
+        } else {
+            desktop_git::review_hunks(&f.root, &f.change())
+        }
+        .unwrap();
+        let before = f.basis();
+        let add = row(&review, "+new\n");
+        let delete = row(&review, "-old\n");
+        let result = if staged {
+            desktop_git::unstage_lines(&review, &[add])
+        } else {
+            desktop_git::stage_lines(&review, &[add])
+        };
+        assert!(result.is_err());
+        assert_eq!(f.basis(), before);
+        if staged {
+            desktop_git::unstage_lines(&review, &[add, delete]).unwrap();
+        } else {
+            desktop_git::stage_lines(&review, &[add, delete]).unwrap();
+        }
+        assert_eq!(f.index(), if staged { b"old" } else { b"new" });
+        assert_eq!(std::fs::read(f.file()).unwrap(), b"new");
+    }
+    for (base, work) in [(b"".as_slice(), b"new\n".as_slice()), (b"old\n", b"")] {
+        let f = Fixture::new("file", base, work);
+        let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+        let selection = if base.is_empty() {
+            row(&review, "+new\n")
+        } else {
+            row(&review, "-old\n")
+        };
+        desktop_git::stage_lines(&review, &[selection]).unwrap();
+        assert_eq!(f.index(), work);
+    }
+}
+
+#[test]
+fn line_control_bounds_refuse_large_reviews_while_whole_hunk_staging_remains_available() {
+    for count in [512, 513] {
+        let base = (0..count).map(|n| format!("old {n}\n")).collect::<String>();
+        let work = (0..count).map(|n| format!("new {n}\n")).collect::<String>();
+        let f = Fixture::new("file", base.as_bytes(), work.as_bytes());
+        let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+        assert_eq!(review.line_selection_available(), count == 512);
+        if count == 513 {
+            let before = f.basis();
+            assert!(desktop_git::stage_lines(&review, &[row(&review, "+new 0\n")]).is_err());
+            assert_eq!(f.basis(), before);
+        }
+        desktop_git::stage_hunk(&review, 0).unwrap();
+        assert_eq!(f.index(), work.as_bytes());
+    }
+    let f = Fixture::new("file", &vec![b'a'; 40_000], &vec![b'b'; 40_000]);
+    let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    assert!(!review.line_selection_available());
+    assert!(desktop_git::stage_lines(&review, &[HunkLine { hunk: 0, line: 1 }]).is_err());
+    desktop_git::stage_hunk(&review, 0).unwrap();
+    assert_eq!(f.index(), vec![b'b'; 40_000]);
+}
+
+#[test]
+fn stale_or_locked_line_operations_cannot_apply_a_partial_selection() {
+    for staged in [false, true] {
+        for mutation in ["working", "index", "lock"] {
+            let f = Fixture::new("file", &contents(&[]), &contents(&[10, 12]));
+            if staged {
+                f.git(&["add", "--all"]);
+            }
+            let review = if staged {
+                desktop_git::review_staged_hunks(&f.root, &f.change())
+            } else {
+                desktop_git::review_hunks(&f.root, &f.change())
+            }
+            .unwrap();
+            let selection = [
+                row(&review, "-line 010\n"),
+                row(&review, "+line 010 edited\n"),
+            ];
+            match mutation {
+                "working" => std::fs::write(f.file(), contents(&[11, 12])).unwrap(),
+                "index" => {
+                    std::fs::write(f.root.join("other"), b"new").unwrap();
+                    f.git(&["add", "--", "other"]);
+                }
+                _ => std::fs::write(f.root.join(".git/index.lock"), b"fixture lock").unwrap(),
+            }
+            let before = f.basis();
+            let bytes = std::fs::read(f.file()).unwrap();
+            let result = if staged {
+                desktop_git::unstage_lines(&review, &selection)
+            } else {
+                desktop_git::stage_lines(&review, &selection)
+            };
+            assert!(result.is_err());
+            assert_eq!(f.basis(), before);
+            assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn individual_line_operations_preserve_quoted_native_names_and_crlf() {
+    use std::os::unix::ffi::OsStrExt;
+    for name in [
+        PathBuf::from(":(glob)*\n\tfile"),
+        PathBuf::from(OsStr::from_bytes(b"lines-\xff")),
+    ] {
+        let f = Fixture::new(
+            name,
+            b"before\r\nold\r\nend\r\n",
+            b"before\r\nnew\r\nend\r\n",
+        );
+        let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+        desktop_git::stage_lines(
+            &review,
+            &[row(&review, "-old\r\n"), row(&review, "+new\r\n")],
+        )
+        .unwrap();
+        assert_eq!(f.index(), b"before\r\nnew\r\nend\r\n");
+        let staged = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+        desktop_git::unstage_lines(
+            &staged,
+            &[row(&staged, "-old\r\n"), row(&staged, "+new\r\n")],
+        )
+        .unwrap();
+        assert_eq!(f.index(), b"before\r\nold\r\nend\r\n");
+        assert_eq!(
+            std::fs::read(f.file()).unwrap(),
+            b"before\r\nnew\r\nend\r\n"
+        );
+    }
+}
+
+#[test]
+fn every_nonempty_subset_of_a_two_line_replacement_has_exact_forward_and_reverse_bytes() {
+    for staged in [false, true] {
+        let f = Fixture::new(
+            "file",
+            b"before\nold A\nold B\nafter\n",
+            b"before\nnew A\nnew B\nafter\n",
+        );
+        for mask in 1u8..16 {
+            if staged {
+                f.git(&["add", "--all"]);
+            } else {
+                f.git(&["reset", "--quiet", "--", "file"]);
+            }
+            let review = if staged {
+                desktop_git::review_staged_hunks(&f.root, &f.change())
+            } else {
+                desktop_git::review_hunks(&f.root, &f.change())
+            }
+            .unwrap();
+            let values = ["-old A\n", "-old B\n", "+new A\n", "+new B\n"];
+            let selection = values
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| mask & (1 << index) != 0)
+                .map(|(_, value)| row(&review, value))
+                .collect::<Vec<_>>();
+            let mut expected = String::from("before\n");
+            for (index, value) in ["old A\n", "old B\n"].iter().enumerate() {
+                if (mask & (1 << index) != 0) == staged {
+                    expected.push_str(value);
+                }
+            }
+            for (index, value) in ["new A\n", "new B\n"].iter().enumerate() {
+                if (mask & (1 << (index + 2)) != 0) != staged {
+                    expected.push_str(value);
+                }
+            }
+            expected.push_str("after\n");
+            if staged {
+                desktop_git::unstage_lines(&review, &selection).unwrap();
+            } else {
+                desktop_git::stage_lines(&review, &selection).unwrap();
+            }
+            assert_eq!(
+                f.index(),
+                expected.as_bytes(),
+                "staged={staged} mask={mask}"
+            );
+            assert_eq!(
+                std::fs::read(f.file()).unwrap(),
+                b"before\nnew A\nnew B\nafter\n"
+            );
+        }
     }
 }

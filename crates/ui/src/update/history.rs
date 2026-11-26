@@ -28,6 +28,7 @@ impl Desktop {
                 self.side_resolution_review = None;
                 self.hunk_review = None;
                 self.selected_hunks.clear();
+                self.selected_lines.clear();
                 self.merge_preview = None;
                 self.rebase_preview = None;
                 self.detail = if show {

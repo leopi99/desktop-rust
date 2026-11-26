@@ -73,6 +73,21 @@ pub enum HunkSide {
     Staged,
 }
 
+/// Maximum complete patch bytes offered by individual-line selection.
+pub const MAX_LINE_PATCH_BYTES: usize = 64 * 1024;
+/// Maximum changed rows offered by individual-line selection.
+pub const MAX_LINE_SELECTION_ROWS: usize = 1024;
+
+/// Stable row coordinates inside one complete, freshness-bound hunk review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct HunkLine {
+    /// Zero-based hunk index.
+    pub hunk: usize,
+    /// Zero-based physical patch-row index; header row zero is not selectable.
+    /// Context and no-newline marker rows are also not selectable.
+    pub line: usize,
+}
+
 /// Complete review binding one comparison and its permitted index-only action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HunkReview {
@@ -94,6 +109,28 @@ pub struct HunkReview {
     pub header: String,
     /// Complete context-bearing hunks; their vector index identifies a choice.
     pub hunks: Vec<String>,
+}
+
+impl HunkReview {
+    /// Whether the complete review fits the optional line-control bounds.
+    /// Only added/deleted patch rows count toward the 1,024-row bound; ordinary
+    /// whole-hunk actions retain their separate 512 KiB/128-hunk limits.
+    pub fn line_selection_available(&self) -> bool {
+        let bounded = self
+            .hunks
+            .iter()
+            .map(String::len)
+            .try_fold(self.header.len(), usize::checked_add)
+            .is_some_and(|bytes| bytes <= MAX_LINE_PATCH_BYTES);
+        let count = self
+            .hunks
+            .iter()
+            .flat_map(|hunk| hunk.lines().skip(1))
+            .filter(|row| matches!(row.as_bytes().first(), Some(b'+' | b'-')))
+            .take(MAX_LINE_SELECTION_ROWS + 1)
+            .count();
+        bounded && count > 0 && count <= MAX_LINE_SELECTION_ROWS
+    }
 }
 
 impl FileChange {

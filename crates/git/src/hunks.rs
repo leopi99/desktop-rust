@@ -1,5 +1,6 @@
 //! Complete context-bearing reviews and index-only updates of selected hunks.
-use desktop_core::{ConflictWorkingContent, FileChange, HunkReview, HunkSide};
+mod lines;
+use desktop_core::{ConflictWorkingContent, FileChange, HunkLine, HunkReview, HunkSide};
 use std::{ffi::OsStr, io, path::Path};
 
 fn invalid() -> io::Error {
@@ -244,9 +245,6 @@ fn apply_hunks(review: &HunkReview, indices: &[usize], side: HunkSide) -> io::Re
             "Review the matching staged or unstaged side before changing the index",
         ));
     }
-    let _guard = super::WRITE_LOCK
-        .lock()
-        .map_err(|_| io::Error::other("Write lock poisoned"))?;
     if indices.is_empty() || indices.len() > review.hunks.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -263,15 +261,66 @@ fn apply_hunks(review: &HunkReview, indices: &[usize], side: HunkSide) -> io::Re
             "Select unique valid hunks before changing the index",
         ));
     }
+    let mut patch = review.header.clone();
+    for index in ordered {
+        patch.push_str(&review.hunks[index]);
+    }
+    apply_patch(review, side, &patch, indices.len(), "hunk(s)")
+}
+
+/// Stage selected added/deleted rows from a complete unstaged review.
+/// Coordinates include the hunk header as row zero. Context and no-newline marker
+/// rows cannot be selected. Partial selection of no-newline hunks is refused.
+///
+/// # Errors
+///
+/// Returns an error for invalid/duplicate/empty selection, line-control limits,
+/// unsupported EOF selection, stale/wrong-side review, patch or index failure.
+pub fn stage_lines(review: &HunkReview, selection: &[HunkLine]) -> io::Result<String> {
+    let patch = lines::patch(review, selection)?;
+    apply_patch(
+        review,
+        HunkSide::Unstaged,
+        &patch,
+        selection.len(),
+        "line(s)",
+    )
+}
+
+/// Unstage selected rows from a complete staged review, without writing working files.
+/// Unselected additions remain context; unselected deletions are omitted from the
+/// reverse patch. The same limits and conservative EOF rules as stage_lines apply.
+///
+/// # Errors
+///
+/// Returns an error for invalid/duplicate/empty selection, line-control limits,
+/// unsupported EOF selection, stale/wrong-side review, patch or index failure.
+pub fn unstage_lines(review: &HunkReview, selection: &[HunkLine]) -> io::Result<String> {
+    let patch = lines::patch(review, selection)?;
+    apply_patch(review, HunkSide::Staged, &patch, selection.len(), "line(s)")
+}
+
+fn apply_patch(
+    review: &HunkReview,
+    side: HunkSide,
+    patch: &str,
+    count: usize,
+    unit: &str,
+) -> io::Result<String> {
+    if review.side != side {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Review the matching side before updating the index",
+        ));
+    }
+    let _guard = super::WRITE_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("Write lock poisoned"))?;
     let root = &review.repository.path;
     if self::review(root, &review.change, side)? != *review {
         return Err(io::Error::other(
             "Hunk review changed; review the matching side again before updating the index",
         ));
-    }
-    let mut patch = review.header.clone();
-    for index in ordered {
-        patch.push_str(&review.hunks[index]);
     }
     let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
     if side == HunkSide::Staged {
@@ -279,9 +328,9 @@ fn apply_hunks(review: &HunkReview, indices: &[usize], side: HunkSide) -> io::Re
     }
     let mut check = args.clone();
     check.extend(["--check", "--", "-"]);
-    super::run_write(root, &check, Some(&patch))?;
+    super::run_write(root, &check, Some(patch))?;
     args.extend(["--", "-"]);
-    super::run_write(root, &args, Some(&patch)).map_err(|error| {
+    super::run_write(root, &args, Some(patch)).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!(
@@ -295,13 +344,14 @@ fn apply_hunks(review: &HunkReview, indices: &[usize], side: HunkSide) -> io::Re
         ));
     }
     Ok(format!(
-        "{} {} hunk(s) of {}; working file retained",
+        "{} {} {} of {}; working file retained",
         if side == HunkSide::Staged {
             "Unstaged"
         } else {
             "Staged"
         },
-        indices.len(),
+        count,
+        unit,
         review.change.path.display()
     ))
 }

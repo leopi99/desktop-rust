@@ -7,8 +7,9 @@ mod update;
 use desktop_core::{
     CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, ConflictSide,
     ConflictSideContent, ConflictSidePreview, ConflictSideResolutionReview, ConflictWorkingContent,
-    FileChange, FileDiff, GitRuntime, HunkReview, HunkSide, LocalBranch, MergeKind, MergePreview,
-    RebaseKind, RebasePreview, Remote, RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
+    FileChange, FileDiff, GitRuntime, HunkLine, HunkReview, HunkSide, LocalBranch, MergeKind,
+    MergePreview, RebaseKind, RebasePreview, Remote, RemoteAction, RemoteUrlKind,
+    RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
 use iced::futures::SinkExt;
@@ -67,6 +68,7 @@ struct Desktop {
     conflict_review: Option<ConflictReview>,
     hunk_review: Option<std::sync::Arc<HunkReview>>,
     selected_hunks: std::collections::BTreeSet<usize>,
+    selected_lines: std::collections::BTreeSet<HunkLine>,
     side_resolution_review: Option<std::sync::Arc<ConflictSideResolutionReview>>,
     selected_stash: Option<StashEntry>,
     stash_message: String,
@@ -106,6 +108,7 @@ enum Message {
     UnstageHunk(usize),
     CancelHunks,
     ToggleHunk(usize, bool),
+    ToggleHunkLine(HunkLine, bool),
     ApplySelectedHunks(HunkSide),
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
@@ -1588,6 +1591,116 @@ mod tests {
             assert!(app.hunk_review.is_none());
             assert_eq!(app.summary, "Summary");
         }
+    }
+
+    fn line_app(side: HunkSide) -> Desktop {
+        let mut app = hunk_app();
+        let mut review = (*app.hunk_review.take().unwrap()).clone();
+        review.side = side;
+        review.hunks = vec![
+            "@@ -1,2 +1,2 @@\n context\n-old\n+new\n".into(),
+            "@@ -10 +10 @@\n-x\n+y\n".into(),
+        ];
+        let _ = app.update(Message::HunksReviewed(Ok(review)));
+        app
+    }
+
+    #[test]
+    fn line_selection_can_refine_a_whole_hunk_and_combine_with_another_block() {
+        let mut app = line_app(HunkSide::Unstaged);
+        let _ = app.update(Message::ToggleHunk(0, true));
+        let _ = app.update(Message::ToggleHunkLine(
+            HunkLine { hunk: 0, line: 3 },
+            false,
+        ));
+        assert!(app.selected_hunks.is_empty());
+        assert_eq!(
+            app.selected_lines.iter().copied().collect::<Vec<_>>(),
+            vec![HunkLine { hunk: 0, line: 2 }]
+        );
+        for line in [0, 1, 999] {
+            let _ = app.update(Message::ToggleHunkLine(HunkLine { hunk: 0, line }, true));
+        }
+        assert_eq!(app.selected_lines.len(), 1);
+        let _ = app.update(Message::ToggleHunk(1, true));
+        assert_eq!(
+            app.combined_hunk_lines(app.hunk_review.as_ref().unwrap()),
+            vec![
+                HunkLine { hunk: 0, line: 2 },
+                HunkLine { hunk: 1, line: 1 },
+                HunkLine { hunk: 1, line: 2 }
+            ]
+        );
+        let _ = app.update(Message::ToggleHunk(0, true));
+        assert!(app.selected_lines.is_empty());
+        assert_eq!(app.selected_hunks.len(), 2);
+    }
+
+    #[test]
+    fn applying_selected_lines_is_direction_bound_consumes_authority_and_keeps_drafts() {
+        for side in [HunkSide::Unstaged, HunkSide::Staged] {
+            let mut app = line_app(side);
+            let _ = app.update(Message::ToggleHunkLine(HunkLine { hunk: 0, line: 2 }, true));
+            let wrong = if side == HunkSide::Staged {
+                HunkSide::Unstaged
+            } else {
+                HunkSide::Staged
+            };
+            let _ = app.update(Message::ApplySelectedHunks(wrong));
+            assert!(!app.loading);
+            assert_eq!(app.selected_lines.len(), 1);
+            let _ = app.update(Message::ApplySelectedHunks(side));
+            assert!(app.loading);
+            assert!(app.hunk_review.is_none());
+            assert!(app.selected_lines.is_empty());
+            let _ = app.update(Message::ToggleHunkLine(HunkLine { hunk: 0, line: 3 }, true));
+            let _ = app.update(Message::CancelHunks);
+            assert!(app.selected_lines.is_empty());
+            let _ = app.update(Message::Wrote(Operation::Index, Err("index locked".into())));
+            assert!(app.loading);
+            let _ = app.update(Message::Refreshed(Err("refresh failed".into())));
+            assert!(!app.loading);
+            assert!(app.selected_lines.is_empty());
+            assert_eq!(app.summary, "Summary");
+            assert_eq!(app.description, "Details");
+        }
+    }
+
+    #[test]
+    fn line_choices_obey_review_invalidation_eof_bounds_and_busy_guards() {
+        for action in 0..5 {
+            let mut app = line_app(HunkSide::Unstaged);
+            let _ = app.update(Message::ToggleHunkLine(HunkLine { hunk: 0, line: 2 }, true));
+            let message = match action {
+                0 => Message::CancelHunks,
+                1 => Message::PanelSelected(Panel::Branches),
+                2 => Message::Refreshed(Err("failed".into())),
+                3 => Message::HunksReviewed(Err("failed".into())),
+                _ => Message::StageHunk(1),
+            };
+            let _ = app.update(message);
+            assert!(app.selected_lines.is_empty());
+            assert!(app.selected_hunks.is_empty());
+            assert_eq!(app.summary, "Summary");
+        }
+        for body in [
+            "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n"
+                .to_owned(),
+            format!("@@ -1 +1 @@\n-{}\n+new\n", "x".repeat(70_000)),
+        ] {
+            let mut app = line_app(HunkSide::Unstaged);
+            let mut review = (*app.hunk_review.take().unwrap()).clone();
+            review.hunks = vec![body];
+            let _ = app.update(Message::HunksReviewed(Ok(review)));
+            let _ = app.update(Message::ToggleHunkLine(HunkLine { hunk: 0, line: 1 }, true));
+            assert!(app.selected_lines.is_empty());
+            let _ = app.update(Message::ToggleHunk(0, true));
+            assert_eq!(app.selected_hunks.len(), 1);
+        }
+        let mut app = line_app(HunkSide::Unstaged);
+        app.loading = true;
+        let _ = app.update(Message::ToggleHunkLine(HunkLine { hunk: 0, line: 2 }, true));
+        assert!(app.selected_lines.is_empty());
     }
 
     fn history_commit(number: usize) -> CommitSummary {

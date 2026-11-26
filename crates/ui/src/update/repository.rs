@@ -29,6 +29,7 @@ impl Desktop {
                 self.side_resolution_review = None;
                 self.hunk_review = None;
                 self.selected_hunks.clear();
+                self.selected_lines.clear();
                 self.merge_preview = None;
                 self.rebase_preview = None;
                 self.abort_merge_pending = false;
@@ -63,6 +64,7 @@ impl Desktop {
                 self.side_resolution_review = None;
                 self.hunk_review = None;
                 self.selected_hunks.clear();
+                self.selected_lines.clear();
                 self.merge_preview = None;
                 self.rebase_preview = None;
                 self.abort_merge_pending = false;
@@ -82,6 +84,7 @@ impl Desktop {
                 self.side_resolution_review = None;
                 self.hunk_review = None;
                 self.selected_hunks.clear();
+                self.selected_lines.clear();
                 self.delete_branch_pending = None;
                 self.loading = false;
                 match result {
@@ -207,6 +210,7 @@ impl Desktop {
         self.side_resolution_review = None;
         self.hunk_review = None;
         self.selected_hunks.clear();
+        self.selected_lines.clear();
         self.merge_preview = None;
         self.rebase_preview = None;
         self.abort_merge_pending = false;
