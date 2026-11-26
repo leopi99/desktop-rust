@@ -187,8 +187,18 @@ fn unsupported_formats_and_recreated_paths_keep_full_file_staging_only() {
         }
         let before = f.basis();
         let bytes = std::fs::read(f.file()).unwrap();
+        let change = if kind == "new" {
+            desktop_git::snapshot(&f.root)
+                .unwrap()
+                .changes
+                .into_iter()
+                .find(|change| change.path == f.name && change.index == '?')
+                .unwrap()
+        } else {
+            f.change()
+        };
         assert!(
-            desktop_git::review_hunks(&f.root, &f.change()).is_err(),
+            desktop_git::review_hunks(&f.root, &change).is_err(),
             "{kind}"
         );
         assert_eq!(f.basis(), before);
