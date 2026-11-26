@@ -1,6 +1,6 @@
 # Rust rewrite status
 
-Updated: 2026-11-24. This is the implementation/milestone index, not an upstream
+Updated: 2026-11-26. This is the implementation/milestone index, not an upstream
 parity attestation. Use [backlog](backlog.md) for remaining task IDs,
 [quality](quality.md) for engineering rules and `upstream/state.json` for release
 checkpoints. Detailed usage/limitations remain in [the rewrite guide](../rust-rewrite.md).
@@ -34,7 +34,7 @@ All eight are merged. Independent prototype features do not imply release parity
 | Area | Implemented and checked | Remaining boundary |
 | --- | --- | --- |
 | Workspace | core/Git/Iced split; Cargo lockfile; Rust/npm CI | Quality policy in the current batch still needs its batch merge. |
-| Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, commits | Hunk selection, large-repository virtualization, richer diff rendering. |
+| Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, scoped single-hunk staging, commits | Hunk unstaging, line/multiple-hunk selection, broader formats, large-repository virtualization and richer rendering. |
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
@@ -88,7 +88,7 @@ Default-branch CI activation follows the batch merge.
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 326 Rust tests, 32 upstream tests and 10 policy
+The current reliability batch passed 340 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -193,6 +193,19 @@ were visually inspected in `/tmp/desktop-rust-history-branch-960` and
 `/tmp/desktop-rust-history-branch-1200`. These do not automate interaction or prove
 accessibility. Pinned history-menu/dialog/Git helper/store excerpts are recorded
 in the upstream inventory; feature and release parity remain unset.
+Single-hunk staging ([78115619bd](https://github.com/leopi99/desktop-rust/commit/78115619bd5830ce7e46b3cc636312f3c1f89fbe), 2026-11-26) passed 340 Rust tests, including
+96 UI state/capture-option tests, plus 32 upstream and 10 compiler/policy tests and
+the formatter/Clippy/rustdoc/npm lint gates. Ten new Git regressions verify either
+of two blocks, subsequent fresh review, commit of only the selected block, prior
+staged changes, later-hunk offsets after earlier insertions, stale/policy refusal,
+quoted native paths, EOF/CRLF/empty-file bytes, unsupported file kinds, index-lock
+failure and exact 128/129-hunk plus oversized-patch boundaries. Four UI/capture
+regressions cover write authority, invalidation, busy actions, drafts and read-only
+capture requirements. Two-block review and normal Changes captures at 960×640 and
+1200×800 were visually inspected with unchanged fixture files/index/config/refs:
+`/tmp/desktop-rust-hunks-review-dwk8i4xf`. The minimum-size general panel smoke also
+passed with unchanged fixtures (`/tmp/desktop-rust-hunks-smoke-960`). No button-click/accessibility or
+cross-platform parity is claimed. Line selection and hunk unstaging remain open.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.

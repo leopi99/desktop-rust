@@ -39,7 +39,8 @@ Writes within this process are serialized; external clients can still race betwe
 the freshness check and Git acquiring its mandatory locks. Stage uses current file
 contents, so edits made after previewing a diff must be reviewed before staging.
 Editing the repository path invalidates the loaded write target. Full-file staging
-is supported; hunk selection and interactive hook/signing prompts remain planned.
+is supported; the scoped hunk-staging workflow below is also available. Line-level
+selection and interactive hook/signing prompts remain planned.
 The branch controls list local branches, show the current branch (or detached HEAD),
 and create-and-switch or switch to an existing branch. New branch names are checked
 as literal refs: options and previous-checkout shorthand are rejected. Switching
@@ -49,6 +50,41 @@ linked worktree. Compatible local edits are carried across normally. No force,
 automatic stash or remote branch guessing is used. Before the first commit,
 create-and-switch sets the initial branch name; no branch ref exists until commit.
 Commit drafts survive branch changes; a failed creation also retains the branch name.
+
+## Stage one unstaged hunk
+
+For an existing tracked text modification in Changes, choose Review unstaged hunks.
+The app reads a complete, separate patch and displays context-bearing blocks with
+Stage hunk buttons. Each action adds just that block to the index, keeps the working
+file intact and preserves already staged changes and other files. Commit still
+commits the entire index, so review its contents normally. To stage another block,
+review again after the automatic refresh. Close hunk review discards the choice.
+The ordinary, potentially clipped diff preview cannot authorize a partial write.
+
+This first scope accepts unrenamed regular UTF-8 text modifications with unchanged
+Git file mode and no content-conversion policy. New/deleted/renamed files, symlinks,
+submodules, binary/non-UTF-8 data and filters/text/EOL/ident/encoding conversion
+settings require full-file staging or an external Git tool. CRLF bytes without Git
+conversion and no-newline markers are preserved. Unstaging a hunk, choosing several
+hunks at once and selecting individual lines remain planned; Unstage still resets
+the whole file's index entry without changing its working contents.
+
+The complete patch is limited to 512 KiB and 128 hunks; working-file contents to
+8 MiB. An oversized or unsupported patch is refused entirely, never staged from a
+clipped prefix. Git path quoting is retained exactly, including native Unix names.
+The parser checks a single regular-file header and each hunk's row counts. Before
+writing, the app rereads the full review: bytes/mode, status, index/HEAD/operation
+state, attributes, settings and every patch block must still match. Navigation,
+selection, another preview or refresh invalidates the review. Busy controls cannot
+redirect a write, and commit drafts survive successes and failures.
+
+Git first checks then applies the selected context-bearing patch with apply --cached;
+there is no checkout, force, three-way merge, rejected-patch output or working-file
+write. Writes share the existing process lock and Git's index lock. External clients
+and configured hooks can still race preflight checks. A write failure refreshes the
+repository and does not automatically roll back over subsequent edits. Read bounds
+follow the shared Unix policy; automatic cancellation of stalled local writes and
+native Windows capture guarantees remain separate backlog items.
 
 ## Create a branch from history
 
@@ -314,7 +350,7 @@ history navigation QA remains outstanding.
 
 ## UI transition modules
 
-`crates/ui/src/update/mod.rs` exhaustively routes the application's 82 message
+`crates/ui/src/update/mod.rs` exhaustively routes the application's 86 message
 variants to typed events in ten domain handlers: application/navigation,
 repository setup, history, changes/conflicts, branches, merge, rebase, remotes,
 stashes and completion/refresh. Guard failures explicitly match the relevant
@@ -694,11 +730,11 @@ if unattended availability is required.
 The preview now supports local initialization, stage/unstage, commit, and branch
 creation/switching.
 Clone, fetch, fast-forward pull, push and upstream setup are implemented as a
-prototype. Renaming the current committed branch and deleting merged local
-branches with confirmation are supported. Renaming other
-selected branches, force deletion and in-app authentication remain planned.
-Diff rendering is plain monospaced text; syntax highlighting, hunk selection,
-large-diff virtualization and interactive conflict resolution remain planned.
+prototype. Current/selected local branch rename, creation at a history commit and
+deleting merged local branches with confirmation are supported. Force deletion
+and in-app authentication remain planned. Diff rendering is monospaced text with
+scoped single-hunk staging; line selection, hunk unstaging, syntax highlighting,
+large-diff virtualization and full interactive conflict editing remain planned.
 Automated Git integration tests cover staged/unstaged changes, unborn branches,
 rename, deletion, binary files, conflicts, literal pathspecs and non-UTF-8 paths.
 Git tests also cover branch creation/switching, detached and unborn HEAD, invalid

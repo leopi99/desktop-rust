@@ -227,6 +227,40 @@ refusals. UI state tests verify observed selection and busy/completion behavior.
 Full interaction/platform QA, the complete upstream creation flow and further
 history editing remain open. No parity checkpoint is advanced.
 
+## Partial staging: first complete-hunk subset
+
+Focused pinned source inspected:
+[index patch application](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/git/apply.ts),
+[patch-header/hunk formatting excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/lib/patch-formatter.ts)
+and [first/second-hunk formatter tests](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/test/unit/patch-formatter-test.ts).
+The upstream helper builds a selection-aware patch and applies it to the index
+with cached apply, no whitespace correction and support for zero-context hunks.
+Its rename path also reconstructs the staged rename. The formatter handles
+individual selected/unselected lines and computes adjusted row counts/coordinates;
+the inspected tests exercise choosing the first or second block. These focused
+excerpts do not audit the complete selection model, UI, all original fixtures,
+conversion policies or platform behavior.
+
+Rust [78115619bd](https://github.com/leopi99/desktop-rust/commit/78115619bd5830ce7e46b3cc636312f3c1f89fbe) stages a single complete context-bearing hunk of an existing
+unrenamed regular UTF-8 text modification. It retains Git's original quoted patch
+header and hunk bytes; validates row counts and refuses non-regular-mode headers,
+new/deleted/renamed/special/binary data and conversion policies. Full patch input
+is bounded to 512 KiB/128 hunks and working content to 8 MiB. A distinct review
+binds status, index/HEAD/operation state, full working bytes/mode, conversion
+attributes/settings and all patch blocks. Staging reruns the complete review,
+checks then applies only header plus selected block using cached apply, without
+zero-context, three-way, reject or force modes. The ordinary clipped diff is not
+a write token. Git owns index locking; external clients/hooks are not fenced by
+preflight or the process mutex.
+
+Regression evidence covers partial-index/working preservation, both blocks and
+shifted coordinates, commit of one chosen block, EOF/CRLF/empty-file cases, native
+paths, unsupported and stale input, lock failure and hard size/hunk limits. The UI
+exposes each block's action, revokes reviews on navigation/refresh and preserves
+drafts. Hunk unstaging, line/multiple selection, conversion/special-file support,
+full upstream formatter/test audit and interactive/platform QA remain open. This
+is a scoped G-02 increment, not feature/release parity.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.
@@ -236,7 +270,8 @@ Feature identifiers match `upstream/features.json`.
 | --- | --- | --- |
 | repository-init | Partial helper/test inspection; G-04 locally ported | UI callers, preference errors/settings, directory validation, platform behavior. |
 | conflict-resolution | Partial router/helper/caller/status/test inspection; scoped confirmed writes and merge/rebase recovery tests implemented | Coordinated rename and conversion/special-file contracts, original fixture/UI audit and interactive/platform QA. |
-| repository-read, diff, stage-commit, commit-history | Pending | Status/diff/index contracts, hunk selection, parsing, limits and original tests. |
+| stage-commit | Partial complete-hunk apply/formatter/test inspection | Line/multiple selection, hunk unstaging, broader formats, index/commit contracts and full original tests. |
+| repository-read, diff, commit-history | Pending full inventory | Status/diff/history contracts, parsing, limits and original tests. |
 | branches, stash | Partial rename and commit-based creation slices; rest pending | Full branch/stash operations, worktrees, tracking, recovery, original tests and platforms. |
 | remote-settings, remotes, remotes-auth | Pending | URLs/config, transports, accounts, credentials, cancellation and tests. |
 | local-merge, linear-rebase, merge-rebase-conflicts | Pending | Preview/execute/recovery contracts, sequencer state, UI integration and tests. |
