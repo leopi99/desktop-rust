@@ -1,10 +1,13 @@
 # Rust foundations consolidation
 
 Updated: 2026-11-26. Target: `quality/rust-foundations` into `development`.
-This milestone freezes the accumulated engineering work for one consolidated
-review. [PR #9](https://github.com/leopi99/desktop-rust/pull/9) is open as draft with `needs-deep-review`; author assessment
-and additional in-depth human review are pending. Further feature extensions follow in a new batch after consolidation.
-It is a prototype milestone, not an alpha release or upstream parity attestation.
+This milestone consolidated the accumulated engineering work in
+[PR #9](https://github.com/leopi99/desktop-rust/pull/9), merged on 2026-11-26 at
+[e496be487e](https://github.com/leopi99/desktop-rust/commit/e496be487e164bcc5be61654dbe514ccfa0e4a99). The merge tree matches the final published foundation branch.
+The record below retains the review scope and evidence; merge status does not
+close native acceptance tasks or attest upstream parity. Follow-up usability work
+is on `quality/linux-alpha-usability`. This is a prototype milestone, not an alpha
+release.
 
 ## Scope and review order
 
@@ -45,9 +48,9 @@ that review. No automatic merge is part of this milestone.
   advanced integrations remain later milestones.
 - Full upstream baseline analysis is pending. Detected stays at `release-3.6.11`
   / `0102f49aa6c8c554de558299f31b6129b502a2fe`; analyzed/parity stay unset.
-- Hosted Actions minutes are unavailable until December per the owner. Local
-  evidence is required now; scheduled discovery/watchdog execution must be
-  rechecked after quota returns.
+- The owner reported Actions quota limits. PR #9's hosted Rust/lint/CodeQL later
+  succeeded, while macOS jobs could not start and Windows remained queued at
+  inspection. Scheduled discovery/watchdog and all-platform CI remain unverified.
 
 ## Evidence discipline
 
@@ -57,11 +60,11 @@ code. Keep complete local logs and fixture manifests available; commit only a
 small curated set of own-window screenshots as PR review evidence, not automated
 pixel baselines. Never publish credentials or real-project data.
 
-The PR preserves the repository template and adds its `Team-authored review`
-section in the body. It stays draft until the human author assesses this batch's
-changes/evidence; required additional human review is still necessary before
-approval. Open acceptance tasks remain visible rather than being marked done by
-merging an engineering milestone.
+The PR preserved the repository template and its `Team-authored review` section.
+The author's assessment was received before marking it ready; GitHub now records
+it as merged. The review requirements above describe the batch's risk class;
+merge status is recorded separately from verification. Open acceptance tasks
+remain visible rather than being marked done by merging an engineering milestone.
 
 [Persisted local verification evidence](evidence/quality-foundations/README.md) binds
 the tested revision to command outcomes, capture integrity and selected images.

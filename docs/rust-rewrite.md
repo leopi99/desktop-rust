@@ -748,6 +748,14 @@ The default window is 1200×800 with a minimum of 960×640. A renderer layer cli
 sidebar content, including long paths with the software renderer. Views live in
 `crates/ui/src/layout.rs`; Git operations and their freshness checks are unchanged.
 
+Tab and Shift+Tab cycle forward/backward through the current text inputs,
+including the repository path and visible panel fields. Only otherwise unhandled
+Tab presses are mapped; Ctrl/Alt/Super combinations and captured keys retain their
+existing behavior. The sole focused input retains its cursor on a full cycle.
+This does not activate buttons/checkboxes or provide complete keyboard/accessibility
+support. Native focus visibility, scrolling, IME and full manual acceptance remain
+pending; automated checks use real Iced widgets with a headless renderer.
+
 Developer launch options accept a repository, panel and window size:
 
 ```sh
@@ -787,8 +795,8 @@ scrolling and complete interactive write/conflict flows remain unverified.
 For complete manual flows, use [Linux alpha acceptance](rust/alpha-acceptance.md).
 `script/rust-ui-fixture.py` prepares four persistent offline repositories and can
 launch each with isolated Git configuration. Preparation and read-only inspection
-are verified; actual interactive acceptance remains pending. The current
-[consolidation milestone](rust/consolidation.md) freezes feature growth for review.
+are verified; actual interactive acceptance remains pending. The [foundation milestone](rust/consolidation.md) merged through PR #9;
+`quality/linux-alpha-usability` carries the next acceptance increments.
 
 ## Stable upstream maintenance
 

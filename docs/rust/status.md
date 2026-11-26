@@ -7,7 +7,7 @@ checkpoints. Detailed usage/limitations remain in [the rewrite guide](../rust-re
 
 ## Planning estimate
 
-As of 2026-11-24, including the published `quality/rust-foundations` branch:
+Estimates recorded on 2026-11-24, retained after PR #9 merged on 2026-11-26:
 
 | Target | Indicative completion | Scope |
 | --- | --- | --- |
@@ -18,9 +18,10 @@ These are coarse engineering planning estimates over broad work areas, with low
 confidence while the full upstream inventory is incomplete. They are not computed
 from test counts, lines of code or equal-sized backlog items. Reassess after
 baseline analysis and real interaction QA; they do not advance parity checkpoints
-or predict a release date. The current branch still needs consolidated review/merge. Its scope is now frozen
-in [the consolidation note](consolidation.md); [alpha acceptance](alpha-acceptance.md)
-provides disposable manual test fixtures and explicit pending outcomes.
+or predict a release date. PR #9 is now merged; the next usability batch is on
+`quality/linux-alpha-usability`. [The consolidation note](consolidation.md) records
+the merged milestone; [alpha acceptance](alpha-acceptance.md) provides disposable
+manual test fixtures and explicit pending outcomes.
 
 The largest remaining areas are upstream contract inventory/ports, interactive
 UI/accessibility QA, stalled-write cancellation, hunk/history/integration features,
@@ -31,23 +32,51 @@ accounts/credentials, engine distribution and packaged cross-platform delivery.
 PRs #1–#5 introduced the foundation, history, UI panels and branch rename/deletion.
 PR #6 consolidated the stack onto `development`; #7 persisted the detected
 upstream baseline; #8 added external Git runtime diagnostics and interval triage.
-All eight are merged. Independent prototype features do not imply release parity.
+PR #9 consolidated the Rust quality/runtime/workflow batch on 2026-11-26 at
+[e496be487e](https://github.com/leopi99/desktop-rust/commit/e496be487e164bcc5be61654dbe514ccfa0e4a99). All nine are merged; independent prototype features do not imply release parity.
 
 | Area | Implemented and checked | Remaining boundary |
 | --- | --- | --- |
-| Workspace | core/Git/Iced split; Cargo lockfile; Rust/npm CI | Quality policy in the current batch still needs its batch merge. |
+| Workspace | core/Git/Iced split; Cargo lockfile; strict shared Rust policy and Rust/npm CI merged through PR #9 | Follow-up changes still need their own batch validation/review. |
 | Local repositories | init, status, staged/unstaged diffs, full-file stage/unstage, scoped whole-hunk and individual-line staging/unstaging for modifications, additions and deletions; staging working edits at staged rename destinations; commits | Coordinated rename/copy operations, broader formats, implicit EOF joining/editing, large-repository virtualization and richer rendering. |
 | Local history/branches | Fixed-tip history paging, committed diffs, branch creation at a selected commit, create/switch, current/selected rename, reviewed merged-branch deletion | Stronger concurrent-client guarantees, advanced history editing, native platform/interaction QA. |
 | Git workflows | Stash save/restore, conflict review/mark-resolved, merge, linear rebase/continue/abort | Interactive editing/sequences, further recovery flows, complete interaction QA. |
 | Remotes | Clone/fetch/fast-forward pull/push; remote settings; transfer output/cancellation | In-app accounts/OAuth and secure credentials; Windows process-tree termination. |
-| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario | Keyboard/focus/IME/HiDPI/accessibility and complete interactive flows. |
+| UI | Seven panels, own-window captures, read-only deletion review and missing-Git scenario; Tab/Shift+Tab text-input traversal on the follow-up branch | Native focus/keyboard activation for other controls, IME/HiDPI/accessibility and complete interactive flows. |
 | Engine | External Git version/error reports; Unix probe/history/patch deadlines and capture caps, tested on Linux | Windows probe/history/patch/process-tree bounds; stalled-write deadline/cancellation policy; bundled Git/update/capability policy. |
 | Upstream | Weekly discovery, ledger validator, daily watchdog; successful manual runs | Observe scheduled runs, complete initial baseline inventory and port applicable behavior. |
 | Delivery | Linux prototype builds and isolated fixture coverage | Packaging, signing, native account adapters and Windows/macOS release verification. |
 
-## Current batch: Rust quality and process hardening
+## Current batch: Linux alpha usability
 
-Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
+Branch: `quality/linux-alpha-usability`, based on verified PR #9 merge
+`e496be487e164bcc5be61654dbe514ccfa0e4a99`. The merge contains the full published
+foundation tree; the checkout was fast-forwarded before branching.
+
+First increment [d6024034ca](https://github.com/leopi99/desktop-rust/commit/d6024034caa0086b97d204c0e60916041e44f66d) adds unhandled Tab/Shift+Tab navigation among
+text inputs in the current widget tree, with cyclic forward/backward focus and
+no cached field IDs. Other modifier combinations, captured events and text-edit
+keys are left to their existing handlers. Empty/one-input trees are stable;
+revisiting the sole focused input preserves its cursor. The operation never
+activates buttons, writes Git data or invalidates drafts/hunk selections.
+
+Five new regressions use the actual Iced event subscription and text-input widgets
+with a headless renderer, plus application state preservation while busy. They
+are automated widget checks, not a native keyboard session. Keyboard activation
+of buttons/checkboxes, focus visibility/scrolling/panel transitions and full
+A-01–A-10 acceptance remain open. This branch groups compatible usability work
+before one milestone PR; no per-feature PR is opened automatically.
+
+This increment passed 413 Rust tests (112 UI), 10 compiler/policy tests, 32 upstream
+tests, formatter, all-target/all-feature Clippy, warning-free rustdoc and npm lint.
+The minimum-size own-window smoke passed eight panels and three Git failures with
+unchanged fixture state (`/tmp/desktop-rust-linux-usability-smoke-960`). The root UI
+protocol is now 92 variants, with focus routed exhaustively through application
+events. No native keyboard session or complete accessibility QA is claimed.
+
+## Merged batch: Rust quality and process hardening
+
+Branch: `quality/rust-foundations`, merged through PR #9. The batch included:
 
 - Pinned Rust compiler/minimum and stable formatter settings.
 - Workspace lint inheritance, public API contracts and scoped exceptions.
@@ -69,13 +98,10 @@ Branch: `quality/rust-foundations`, based on the merged PR #8. The batch groups:
 - First G-05 phase in `c0fcf39b95`: bounded read-only previews of Git index stages 2/3 with raw blob IDs, text/binary/deletion display and native paths. These do not apply a resolution or provide a write token.
 - Confirmed G-05 regular-file choices in [ba0696b3c5](https://github.com/leopi99/desktop-rust/commit/ba0696b3c57a19c34c5156a82a46f0ef509ac47f): a separate complete review, explicit replacement/deletion confirmation, stale-input checks, exact staged-blob postconditions and refresh after partial failure. Conversion/filter paths and special file kinds remain unsupported.
 
-The batch is engineering groundwork, with no additional feature PR opened for
-each item. Keep commits independently reviewable and group compatible follow-up
-work before the next milestone PR. The active branch stays `quality/rust-foundations`
-for this reliability batch; continue from it rather than dropping its unmerged
-policy by starting again from `development`. Shared capture migration is locally
-complete on Unix, and UI handler separation is locally complete. The current
-implementation scope is ready for consolidated batch review; stalled-write policy
+The foundation batch is merged engineering groundwork, not an alpha release.
+Its independent commits remain reviewable in PR #9. Continue usability work from
+`quality/linux-alpha-usability`, preserving the merged policy. Shared Unix capture
+migration and UI handler separation are locally complete; stalled-write policy
 remains a follow-up. R-05 now covers core snapshot/freshness scans and the
 remote/stash/branch-config/worktree adapters and rebase/conflict preflight reads.
 Merge-tree structured output and rebase diagnostics now use bounded capture;
@@ -84,12 +110,13 @@ explicit unbounded-capture fallbacks. The migrated local-write runner (R-06)
 has no automatic deadline/cancellation for hooks, signing or inherited pipes.
 Status and patch scans each have their own limits; this is not one overall
 operation deadline or a bound on every Git command.
-Default-branch CI activation follows the batch merge.
+Rust policy and CI definitions are now on `development`; scheduled upstream
+discovery/watchdog execution still needs observation.
 
 ## Consolidation and alpha acceptance
 
-The accumulated implementation is frozen in [PR #9](https://github.com/leopi99/desktop-rust/pull/9) (draft,
-`needs-deep-review`) against `development`; see [review order and boundaries](consolidation.md). The new
+The foundation implementation was merged in [PR #9](https://github.com/leopi99/desktop-rust/pull/9)
+on 2026-11-26; see [review order and boundaries](consolidation.md). The
 `script/rust-ui-fixture.py` prepares four isolated offline repositories for
 changes/staging, branches/stash, merge conflict and paused rebase. Initial Git
 states, read-only inspection and refusal to overwrite existing roots are verified.
@@ -103,7 +130,7 @@ records the frozen revision, fresh local gates and four curated own-window image
 
 The last merged runtime batch passed 233 Rust tests and 32 upstream tests, and
 its available/missing-Git layouts were inspected at 960×640 and 1200×800 on Linux.
-The current reliability batch passed 408 Rust tests, 32 upstream tests and 10 policy
+The merged foundation batch passed 408 Rust tests, 32 upstream tests and 10 policy
 tests, including deliberately rejected compiler examples and inheritance/opt-out
 checks for future crates. Clippy, formatting, warning-free rustdoc and npm lint
 also passed. History tests cover multi-megabyte bodies/patches, oversized metadata,
@@ -366,10 +393,11 @@ the full upstream baseline remain open; no checkpoint advances.
 No successful test count substitutes for the required source and human review.
 
 On 2026-11-24 the owner reported Actions minutes exhausted until December 2026.
-Use the complete local Rust quality command, npm lint and upstream ledger/tests
-for current evidence; no GitHub CI result is claimed for this increment. Keep
-workflow definitions and quality requirements in place. Recheck hosted CI and
-scheduled discovery/watchdog execution when the quota becomes available.
+Later checks on PR #9's final head showed hosted Rust, npm lint, CI Lint and CodeQL
+success; macOS jobs did not start due runner/account limits and Windows was queued.
+This does not establish all-platform CI or scheduled discovery/watchdog execution.
+Use the complete local Rust gate, npm lint and ledger/tests for follow-up evidence,
+and recheck hosted execution on the relevant revision.
 
 ## Upstream checkpoint
 

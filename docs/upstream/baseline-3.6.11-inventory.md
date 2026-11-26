@@ -490,6 +490,29 @@ rename review/unstaging remain open. Git status/configuration/similarity determi
 whether a move is reported; Rust does not infer one from separate additions and
 deletions. The full baseline and G-02 remain open; no checkpoint advances.
 
+## Text-input keyboard focus in the Linux preview
+
+Focused pinned [TextBox excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/lib/text-box.tsx)
+pass focus/blur, disabled/read-only and tab-index properties to a DOM input; the
+key handler has caller-specific Enter/search-Escape behavior. The pinned
+[FocusContainer helper](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/lib/focus-container.tsx)
+tracks descendant focus changes and forwards keyboard callbacks. These helpers
+do not establish complete application tab order, modal traversal, button activation
+or accessibility contracts.
+
+Rust [d6024034ca](https://github.com/leopi99/desktop-rust/commit/d6024034caa0086b97d204c0e60916041e44f66d) adds previously missing unhandled Tab/Shift+Tab subscriptions
+and cyclic traversal of the current Iced focusable text inputs. Captured events,
+other modifiers and text-edit keys stay outside the binding. The operation counts
+the active widget tree each time, handles empty/single-input trees and retains the
+cursor of an already focused sole input. Root routing preserves busy state,
+drafts and hunk selections. No Git write or default-button activation is bound.
+
+Five automated checks exercise actual subscription events, Iced text-input trees
+with a headless renderer and application state. Native keyboard delivery, focus
+visibility/scrolling, buttons/checkboxes, panel handover, IME/HiDPI/accessibility and
+full caller/test inspection remain open in UI-01/UI-04. This is Linux preview
+usability work, not a completed upstream port or checkpoint advance.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.

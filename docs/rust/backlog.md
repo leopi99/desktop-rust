@@ -3,7 +3,8 @@
 Updated: 2026-11-26. Tasks describe outcomes and acceptance evidence; they are not
 promises of current support. Update statuses within the working batch and keep
 [status](status.md) and the upstream ledger consistent. `Done` below means locally
-implemented/verified; deployment still depends on merging the batch.
+implemented/verified; the foundation batch is merged through PR #9, while new
+usability work still needs its milestone merge.
 
 ## Batch policy
 
@@ -19,20 +20,30 @@ repository PR skill; a batch is not permission to merge or waive review.
 
 ## Consolidation boundary
 
-Feature growth in `quality/rust-foundations` is frozen in [PR #9](https://github.com/leopi99/desktop-rust/pull/9) (draft,
-`needs-deep-review`) against `development`; use [the consolidation note](consolidation.md) for scope, review
-order and known risks. Subsequent features belong to a follow-up milestone after
-consolidation. The [alpha acceptance plan](alpha-acceptance.md) and offline fixture
-helper make UI-01/UI-02 executable; their actual interaction results remain pending.
+[PR #9](https://github.com/leopi99/desktop-rust/pull/9) merged the frozen foundation
+batch into `development` on 2026-11-26 at [e496be487e](https://github.com/leopi99/desktop-rust/commit/e496be487e164bcc5be61654dbe514ccfa0e4a99). Its tree matches the
+published branch. [The consolidation note](consolidation.md) retains its scope,
+review risks and evidence. Acceptance work continues on
+`quality/linux-alpha-usability`, created from that merge. Keep compatible usability
+changes together for a later milestone PR.
 
-## Current batch: quality foundations
+The [alpha acceptance plan](alpha-acceptance.md) and offline fixture helper make
+UI-01/UI-02 executable; native interaction results remain pending.
+
+## Current batch: Linux alpha usability
+
+| ID | Priority | Status | Acceptance |
+| --- | --- | --- | --- |
+| UI-04 | High | First increment done locally; native QA pending | [d6024034ca](https://github.com/leopi99/desktop-rust/commit/d6024034caa0086b97d204c0e60916041e44f66d) implements cyclic Tab/Shift+Tab across current text inputs, ignores captured keys and Ctrl/Alt/Super combinations, preserves drafts/reviews while busy, and leaves Git actions unchanged. Five automated Iced/widget/state regressions pass. Remaining: keyboard activation of other controls, focus visibility/scrolling/panel changes, IME/HiDPI/accessibility and actual A-01 execution. |
+
+## Merged batch: quality foundations
 
 | ID | Status | Acceptance |
 | --- | --- | --- |
-| Q-01 | Done locally | Every workspace crate inherits shared package/lint values; a new/unchecked crate is rejected by the guard. |
-| Q-02 | Done locally | Toolchain/minimum/formatter are fixed; production panic shortcuts and undocumented public contracts fail the gate. |
-| Q-03 | Done locally | One command runs compiler-policy probes, all-target/all-feature Clippy, tests and warning-free rustdoc; CI uses it. |
-| Q-04 | Done locally | Status, backlog, Rust-specific agent instructions and exception/review rules are documented. |
+| Q-01 | Merged in PR #9 | Every workspace crate inherits shared package/lint values; a new/unchecked crate is rejected by the guard. |
+| Q-02 | Merged in PR #9 | Toolchain/minimum/formatter are fixed; production panic shortcuts and undocumented public contracts fail the gate. |
+| Q-03 | Merged in PR #9 | One command runs compiler-policy probes, all-target/all-feature Clippy, tests and warning-free rustdoc; CI uses it. |
+| Q-04 | Merged in PR #9 | Status, backlog, Rust-specific agent instructions and exception/review rules are documented. |
 
 ## Next increment in the active batch: runtime and process hardening
 
@@ -47,8 +58,8 @@ helper make UI-01/UI-02 executable; their actual interaction results remain pend
 | R-07 | High | Done locally; verified on Linux | [d3d72cc76f](https://github.com/leopi99/desktop-rust/commit/d3d72cc76fa2731cc814511254782dc8cdf551d7) replaces metadata-then-unbounded untracked reads with a shared bounded working-file adapter: 1 MiB untracked capture, 8 MiB conflict/hunk capture, one overflow probe byte and no accepted prefix on overflow/I/O failure. Unix leaf opens refuse symlinks and use nonblocking flags; descriptor type and ancestor checks precede reads. Symlink labels retain their target spelling. Preview paths normalize to the Git root, including calls from subdirectories and native newline/non-UTF-8 names. Tests verify consumed-byte bounds, late errors, invalid paths, stale/linked leaves and preserved data. Ancestor rename races, Windows leaf guarantees and regular-file I/O deadlines remain open. |
 | A-01 | Medium | Done locally; verified on Linux | [2f79f69b3d](https://github.com/leopi99/desktop-rust/commit/2f79f69b3d307da920f7dbae0175a3d9711af3a1) replaces the large update match with exhaustive routing of 74 messages to ten typed domain handlers. Nine support methods move with their domains; large successful responses are boxed without cloning payloads. All 82 existing UI state tests pass, and extraction review confirms preserved guards/bodies. Offline smoke captures eight panels plus three Git diagnostic failures at 960×640 with unchanged fixture data; four captures visually inspected. This does not establish interactive/accessibility QA. |
 
-Continue from the active `quality/rust-foundations` branch for the next compatible
-hardening increments, keeping commits independently reviewable. Review process
+The foundation branch is merged. Continue compatible acceptance work on
+`quality/linux-alpha-usability`, keeping commits independently reviewable. Review process
 changes and UI refactoring in depth. Set a concrete milestone scope before opening
 the batch PR; do not combine the entire backlog into one PR.
 

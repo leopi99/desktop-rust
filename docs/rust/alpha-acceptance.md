@@ -1,8 +1,9 @@
 # Linux alpha acceptance
 
 Updated: 2026-11-26. This is an executable manual test plan, not a record of
-completed interaction testing. The current milestone consolidates engineering
-foundations; it does not declare a distributable Linux alpha or upstream parity.
+completed interaction testing. PR #9 merged the engineering foundations; the next
+batch is `quality/linux-alpha-usability`. Neither declares a distributable Linux
+alpha or upstream parity.
 
 ## Prepare disposable repositories
 
@@ -72,6 +73,7 @@ status alone as proof that the right content was committed.
 | Four repositories prepared with expected staged/unstaged and conflict states | Verified locally on 2026-11-26. |
 | Read-only inspection and refusal to overwrite an existing root | Verified locally; initial manifest and every fixture signature unchanged. |
 | Automated Rust/Git/policy checks and own-window smoke | Recorded separately in [status](status.md) and the consolidation evidence. |
+| Text-input Tab/Shift+Tab traversal | Implemented in the usability branch; automated Iced subscription/widget/state checks pass. Native key input, other controls and accessibility remain pending. |
 | A-01 through A-10 actual interactive execution | Not run; UI-01/UI-02 remain open. |
 | Native Windows/macOS, full accessibility/IME/HiDPI verification | Not run. |
 
