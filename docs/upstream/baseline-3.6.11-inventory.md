@@ -560,6 +560,29 @@ explicit caller scroll restoration, non-default anchors, panel handover and full
 accessibility/platform contracts remain open. This is preview usability work;
 UI-01/UI-05 and baseline analysis stay open and no checkpoint advances.
 
+## Semantic identity for form-input state
+
+Focused pinned [TextBox excerpts](https://github.com/desktop/desktop/blob/0102f49aa6c8c554de558299f31b6129b502a2fe/app/src/ui/lib/text-box.tsx)
+create/release an input ID during component mount/unmount, retain a DOM reference,
+update displayed value from new props and forward focus/blur callbacks. These
+excerpts do not establish the full application's component-key, panel transition
+or focus-restoration contracts.
+
+Rust [19ad69e3da](https://github.com/leopi99/desktop-rust/commit/19ad69e3da6c20203298b4daea93b4421b70c947) adds typed purpose/context IDs around form inputs because
+Iced can reuse edit state for the same widget type in a tree slot. Same-ID redraws
+keep native focus/cursor/selection; a different ID recreates the child edit state
+before subsequent keys can edit the replacement input. Model drafts are untouched.
+The shared branch-name draft uses different History/Branches identities, while the
+common repository-path field stays stable. Bounds metadata, pointer/overlay
+forwarding and focus reveal remain composed around the guarded field.
+
+Five real-widget/event regressions cover retargeted typing, explicit refocus,
+same-field selection, reorder, shared/common contexts and parent scroll retention.
+Native panel interaction, full instance/entity identity contracts, focus restoration
+across removed/relocated controls, IME/accessibility and original caller/fixture
+audit remain open. This is an Iced preview guard, not a completed DOM behavior port.
+UI-01/UI-06 and the full baseline stay open; no checkpoint advances.
+
 ## Full-baseline coverage grid
 
 All rows remain open. Partial helper inspection is not a completed feature audit.

@@ -128,6 +128,28 @@ and npm lint. The minimum-size eight-panel/three-failure smoke passed with
 unchanged fixture data (`/tmp/desktop-rust-focus-reveal-smoke-960`). The root UI
 protocol remains 92 messages, reusing the existing focus operation route.
 
+Semantic field identity follow-up [19ad69e3da](https://github.com/leopi99/desktop-rust/commit/19ad69e3da6c20203298b4daea93b4421b70c947) prevents a reused widget slot
+from carrying focus/cursor/selection into an input with another purpose. Current
+form inputs use explicit purpose/context IDs; the shared branch-name draft has
+different IDs in History and Branches. A changed ID recreates only that field's
+native edit state, while same-ID redraws retain focus and selection. Draft values
+stay in the application model. A common repository-path field keeps its identity
+when the panel body changes. Affected reordered inputs lose focus safely rather
+than transferring it to a different purpose; this does not restore focus across
+removed/recreated widgets or arbitrary relocations.
+
+Five new real-widget/event regressions verify blocked typing after retargeting,
+explicit refocus before editing the new field, same-field selection retention,
+reordered fields, shared-draft contexts, common fields and stable parent scroll
+offsets/reveal. The complete local gate passes 431 Rust tests (130 UI), 10 policy
+tests and 32 upstream tests, plus formatter/Clippy/rustdoc/npm lint. The minimum-size
+eight-panel/three-failure smoke passed with unchanged fixture data
+(`/tmp/desktop-rust-field-identity-smoke-960`). Programmatic navigation/scroll-focus
+captures were visually inspected at 960×640 and 1200×800 with unchanged fixture
+signatures (`/tmp/desktop-rust-field-identity-focus-vx4h8iz0`). The root protocol
+remains 92 messages. Native keyboard/IME/accessibility and complete panel-focus
+restoration remain open in UI-01/UI-06; no upstream checkpoint advances.
+
 ## Merged batch: Rust quality and process hardening
 
 Branch: `quality/rust-foundations`, merged through PR #9. The batch included:

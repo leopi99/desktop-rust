@@ -768,8 +768,15 @@ This covers the default top-left alignment used by the current views. Focus stil
 works for future controls without bounds metadata, but those controls need an
 annotation to be revealed automatically.
 
-Native keyboard delivery, panel focus handover, non-default scroll anchors,
-IME/HiDPI and complete accessibility/manual acceptance remain pending. Automated
+Normal redraws of the same field preserve focus, cursor and selection. If a form
+slot becomes a different input purpose/context, its native edit state starts fresh;
+use Tab or click to select the new field before typing. This leaves stored draft
+text intact. Reordering/removing fields may clear their focus rather than transfer
+it to another input; common unchanged fields retain their identity.
+
+Native keyboard delivery, restoration across removed/relocated fields,
+non-default scroll anchors, IME/HiDPI and complete accessibility/manual acceptance
+remain pending. Automated
 checks exercise real Iced widgets/events with a headless renderer.
 
 Developer launch options accept a repository, panel and window size:

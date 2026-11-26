@@ -106,6 +106,10 @@ helpers with their domain. Box large successful response payloads when required
 by enum-size checks; do not clone snapshots/reviews just to route a message.
 Exercise existing state regressions for routing changes and add behavioral tests
 when changing a guard or transition, rather than tests of file organization.
+Form inputs in reused view slots use `focus_region::field` with a typed `FieldId`
+for their purpose/panel context. Keep identities independent of editable draft
+text; shared draft storage does not imply the same input context. Preserve native
+edit state on ordinary redraws and reset it when the slot changes purpose.
 
 ## Updating the policy
 
