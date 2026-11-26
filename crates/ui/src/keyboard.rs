@@ -1,4 +1,4 @@
-//! Unhandled Tab traversal of current focusable controls and the capture clock.
+//! Unhandled focus traversal/review dismissal and the developer capture clock.
 mod reveal;
 use crate::{Desktop, Message};
 use iced::advanced::widget::{operation, Id, Operation};
@@ -22,6 +22,9 @@ pub(super) fn subscription(app: &Desktop) -> Subscription<Message> {
 }
 
 fn key_pressed(key: Key, modifiers: Modifiers) -> Option<Message> {
+    if key == Key::Named(key::Named::Escape) && modifiers.is_empty() {
+        return Some(Message::DismissReview);
+    }
     if key != Key::Named(key::Named::Tab) {
         return None;
     }
@@ -285,7 +288,6 @@ mod tests {
             ));
             for key in [
                 Key::Named(key::Named::Enter),
-                Key::Named(key::Named::Escape),
                 Key::Character("è".into()),
                 Key::Character("v".into()),
             ] {
@@ -368,6 +370,133 @@ mod tests {
                 cursor.state(&text_input::Value::new("path")),
                 text_input::cursor::State::Index(0)
             ));
+        }
+    }
+
+    fn escape(app: &mut Desktop) {
+        let events = messages(
+            app,
+            vec![press(
+                Key::Named(key::Named::Escape),
+                Modifiers::empty(),
+                Status::Ignored,
+            )],
+        );
+        assert_eq!(events.len(), 1);
+        for message in events {
+            assert!(matches!(message, Message::DismissReview));
+            let _ = app.update(message);
+        }
+    }
+
+    #[test]
+    fn escape_subscription_accepts_only_ignored_unmodified_key_presses() {
+        let mut events = Vec::new();
+        for bits in 0..16 {
+            let mut modifiers = Modifiers::empty();
+            for (bit, flag) in [
+                Modifiers::SHIFT,
+                Modifiers::CTRL,
+                Modifiers::ALT,
+                Modifiers::LOGO,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if bits & (1 << bit) != 0 {
+                    modifiers |= flag;
+                }
+            }
+            for status in [Status::Captured, Status::Ignored] {
+                events.push(press(Key::Named(key::Named::Escape), modifiers, status));
+            }
+            events.push(subscription::Event::Interaction {
+                window: iced::window::Id::unique(),
+                event: Event::Keyboard(iced::keyboard::Event::KeyReleased {
+                    key: Key::Named(key::Named::Escape),
+                    location: iced::keyboard::Location::Standard,
+                    modifiers,
+                }),
+                status: Status::Ignored,
+            });
+        }
+        let result = messages(&Desktop::default(), events);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(result[0], Message::DismissReview));
+    }
+
+    #[test]
+    fn escape_dismisses_only_the_active_review_without_writes_or_draft_loss() {
+        for side_choice in [false, true] {
+            let mut app = crate::tests::hunk_app();
+            app.summary = "keep summary".into();
+            app.description = "keep body".into();
+            app.notice = "keep notice".into();
+            app.abort_merge_pending = true;
+            app.abort_rebase_pending = true;
+            app.transfer_progress = "keep transfer status".into();
+            if side_choice {
+                app.side_resolution_review =
+                    Some(std::sync::Arc::new(crate::side_preview_tests::choice(&app)));
+                app.hunk_review = None;
+            } else {
+                app.selected_hunks.insert(0);
+                app.selected_lines
+                    .insert(crate::HunkLine { hunk: 0, line: 1 });
+            }
+            let snapshot = app.snapshot.clone();
+            escape(&mut app);
+            escape(&mut app);
+            assert!(app.hunk_review.is_none());
+            assert!(app.side_resolution_review.is_none());
+            assert!(app.selected_hunks.is_empty());
+            assert!(app.selected_lines.is_empty());
+            assert!(!app.loading);
+            assert_eq!(app.snapshot, snapshot);
+            assert_eq!(app.summary, "keep summary");
+            assert_eq!(app.description, "keep body");
+            assert_eq!(app.notice, "keep notice");
+            assert!(app.abort_merge_pending);
+            assert!(app.abort_rebase_pending);
+            assert_eq!(app.transfer_progress, "keep transfer status");
+        }
+    }
+
+    #[test]
+    fn escape_cannot_redirect_busy_operations_or_dismiss_reviews_in_other_panels() {
+        for panel in [
+            crate::Panel::Changes,
+            crate::Panel::History,
+            crate::Panel::Branches,
+            crate::Panel::Remotes,
+            crate::Panel::Stashes,
+            crate::Panel::Repository,
+            crate::Panel::Git,
+        ] {
+            for loading in [false, true] {
+                if panel == crate::Panel::Changes && !loading {
+                    continue;
+                }
+                let mut app = crate::tests::hunk_app();
+                app.panel = panel;
+                app.loading = loading;
+                app.selected_hunks.insert(0);
+                let review = std::sync::Arc::clone(app.hunk_review.as_ref().unwrap());
+                let choice = std::sync::Arc::new(crate::side_preview_tests::choice(&app));
+                app.side_resolution_review = Some(std::sync::Arc::clone(&choice));
+                escape(&mut app);
+                assert!(std::sync::Arc::ptr_eq(
+                    app.hunk_review.as_ref().unwrap(),
+                    &review
+                ));
+                assert!(std::sync::Arc::ptr_eq(
+                    app.side_resolution_review.as_ref().unwrap(),
+                    &choice
+                ));
+                assert!(app.selected_hunks.contains(&0));
+                assert_eq!(app.loading, loading);
+                assert_eq!(app.panel, panel);
+            }
         }
     }
 }

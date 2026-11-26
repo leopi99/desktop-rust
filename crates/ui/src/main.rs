@@ -91,6 +91,7 @@ struct Desktop {
 
 #[derive(Debug, Clone)]
 enum Message {
+    DismissReview,
     MoveFocus(keyboard::FocusDirection),
     PanelSelected(Panel),
     CheckGitRuntime,
@@ -2335,7 +2336,7 @@ mod side_preview_tests {
         }
     }
 
-    fn choice(app: &Desktop) -> ConflictSideResolutionReview {
+    pub(super) fn choice(app: &Desktop) -> ConflictSideResolutionReview {
         let snapshot = app.snapshot.as_ref().unwrap();
         ConflictSideResolutionReview {
             preview: ConflictSidePreview {

@@ -1,7 +1,7 @@
 use super::{
     clip::clip,
     focus_region::{field, FieldId},
-    navigation::{file_button, FileAction},
+    navigation::{file_button, review_button, FileAction, ReviewTarget},
     Desktop, Message, Panel,
 };
 use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
@@ -121,10 +121,13 @@ impl Desktop {
                 "Replace working file and stage"
             };
             let mut apply = button("Apply choice").style(button::danger);
-            let mut cancel = button("Cancel choice");
+            let cancel = review_button(
+                "Cancel choice",
+                ReviewTarget::ConflictChoice(std::sync::Arc::clone(review)),
+                !self.loading,
+            );
             if !self.loading {
                 apply = apply.on_press(Message::ApplyConflictSideResolution);
-                cancel = cancel.on_press(Message::CancelConflictSideResolution);
             }
             files = files.push(text(format!(
                 "Reviewed {:?}: {}",
@@ -424,10 +427,11 @@ impl Desktop {
             }
         }
         let changes_detail: Element<'_, Message> = if let Some(review) = &self.hunk_review {
-            let mut close = button("Close hunk review");
-            if !self.loading {
-                close = close.on_press(Message::CancelHunks);
-            }
+            let close = review_button(
+                "Close hunk review",
+                ReviewTarget::Hunks(std::sync::Arc::clone(review)),
+                !self.loading,
+            );
             let mut contents = column![
                 text(format!(
                     "{:?} hunks: {}",

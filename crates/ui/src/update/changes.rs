@@ -8,6 +8,7 @@ use iced::Task;
 
 #[derive(Debug)]
 pub(super) enum Event {
+    DismissReview,
     Select(FileChange),
     ReviewHunks(FileChange, crate::HunkSide),
     HunksReviewed(Result<Box<crate::HunkReview>, String>),
@@ -42,6 +43,14 @@ enum PatchSelection {
 impl Desktop {
     pub(super) fn update_changes(&mut self, event: Event) -> Task<Message> {
         match event {
+            Event::DismissReview if !self.loading && self.panel == crate::Panel::Changes => {
+                if self.hunk_review.is_some() {
+                    return self.update_changes(Event::CancelHunks);
+                }
+                if self.side_resolution_review.is_some() {
+                    return self.update_changes(Event::CancelConflictSideResolution);
+                }
+            }
             Event::Select(change) if !self.loading => {
                 if let Some(snapshot) = &self.snapshot {
                     let path = snapshot.repository.path.clone();
@@ -405,7 +414,8 @@ impl Desktop {
                     );
                 }
             }
-            Event::ToggleHunkLine(..)
+            Event::DismissReview
+            | Event::ToggleHunkLine(..)
             | Event::ToggleHunk(..)
             | Event::ApplySelectedHunks(..)
             | Event::ReviewHunks(..)

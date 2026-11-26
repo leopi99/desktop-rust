@@ -16,6 +16,7 @@ use iced::Task;
 impl Desktop {
     pub(super) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::DismissReview => self.update_changes(changes::Event::DismissReview),
             Message::MoveFocus(direction) => {
                 self.update_application(application::Event::MoveFocus(direction))
             }
