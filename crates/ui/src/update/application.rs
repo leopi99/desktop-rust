@@ -49,6 +49,11 @@ impl Desktop {
             }
             Event::CaptureFrame => {
                 self.capture_frames += 1;
+                if self.capture_scroll_focus && self.capture_frames == 1 {
+                    return self.update(Message::MoveFocus(
+                        crate::keyboard::FocusDirection::Previous,
+                    ));
+                }
                 if self.capture_navigation_focus && self.capture_frames <= 2 {
                     return self.update(Message::MoveFocus(crate::keyboard::FocusDirection::Next));
                 }

@@ -23,11 +23,11 @@ where
     if enabled {
         inner = inner.on_press(Message::PanelSelected(panel));
     }
-    Element::new(Navigation {
+    crate::focus_region::region(Element::new(Navigation {
         inner: inner.into(),
         panel,
         enabled,
-    })
+    }))
 }
 
 struct Navigation<'a, R> {

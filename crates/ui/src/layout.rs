@@ -1,4 +1,4 @@
-use super::{clip::clip, Desktop, Message, Panel};
+use super::{clip::clip, focus_region::region, Desktop, Message, Panel};
 use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
 use iced::widget::{button, checkbox, column, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length};
@@ -269,15 +269,19 @@ impl Desktop {
                 row![preview, merge].spacing(8),
                 row![preview_rebase, rebase].spacing(8),
                 column![
-                    text_input("New branch name", &self.new_branch)
-                        .on_input(Message::BranchNameChanged),
+                    region(
+                        text_input("New branch name", &self.new_branch)
+                            .on_input(Message::BranchNameChanged)
+                    ),
                     create
                 ]
                 .spacing(6)
                 .width(Length::Fill),
                 column![
-                    text_input("New local branch name", &self.rename_branch)
-                        .on_input(Message::RenameBranchNameChanged),
+                    region(
+                        text_input("New local branch name", &self.rename_branch)
+                            .on_input(Message::RenameBranchNameChanged)
+                    ),
                     rename,
                     rename_selected
                 ]
@@ -576,8 +580,10 @@ impl Desktop {
                 )
                 .size(14),
                 text("Create a local branch here; keep the current branch checked out").size(14),
-                text_input("New branch name", &self.new_branch)
-                    .on_input(Message::BranchNameChanged),
+                region(
+                    text_input("New branch name", &self.new_branch)
+                        .on_input(Message::BranchNameChanged)
+                ),
                 create_at
             ]
             .spacing(6)
@@ -586,9 +592,13 @@ impl Desktop {
             column![].into()
         } else {
             column![
-                text_input("Commit summary", &self.summary).on_input(Message::SummaryChanged),
-                text_input("Description (optional)", &self.description)
-                    .on_input(Message::DescriptionChanged),
+                region(
+                    text_input("Commit summary", &self.summary).on_input(Message::SummaryChanged)
+                ),
+                region(
+                    text_input("Description (optional)", &self.description)
+                        .on_input(Message::DescriptionChanged)
+                ),
                 commit
             ]
             .spacing(12)
@@ -601,7 +611,7 @@ impl Desktop {
         let mut sidebar = column![
             text("Desktop Rust").size(24),
             text("Development preview").size(13),
-            text_input("Repository path", &self.path).on_input(Message::PathChanged),
+            region(text_input("Repository path", &self.path).on_input(Message::PathChanged)),
             open,
         ]
         .spacing(12)
@@ -717,19 +727,27 @@ impl Desktop {
             Panel::Repository => scrollable(
                 column![
                     text("Create a repository").size(20),
-                    text_input("New or existing project folder", &self.init_destination)
-                        .on_input(Message::InitDestinationChanged),
-                    text_input(
-                        "Initial branch (blank: Git preference or main)",
-                        &self.init_branch
-                    )
-                    .on_input(Message::InitBranchChanged),
+                    region(
+                        text_input("New or existing project folder", &self.init_destination)
+                            .on_input(Message::InitDestinationChanged)
+                    ),
+                    region(
+                        text_input(
+                            "Initial branch (blank: Git preference or main)",
+                            &self.init_branch
+                        )
+                        .on_input(Message::InitBranchChanged)
+                    ),
                     initialize,
                     text("Clone a repository").size(20),
-                    text_input("Clone URL or local source", &self.clone_source)
-                        .on_input(Message::CloneSourceChanged),
-                    text_input("New destination folder", &self.clone_destination)
-                        .on_input(Message::CloneDestinationChanged),
+                    region(
+                        text_input("Clone URL or local source", &self.clone_source)
+                            .on_input(Message::CloneSourceChanged)
+                    ),
+                    region(
+                        text_input("New destination folder", &self.clone_destination)
+                            .on_input(Message::CloneDestinationChanged)
+                    ),
                     clone,
                 ]
                 .spacing(16),

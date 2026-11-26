@@ -1,8 +1,9 @@
 //! Unhandled Tab traversal of current focusable controls and the capture clock.
+mod reveal;
 use crate::{Desktop, Message};
 use iced::advanced::widget::{operation, Id, Operation};
 use iced::keyboard::{key, Key, Modifiers};
-use iced::{Rectangle, Subscription};
+use iced::{Rectangle, Subscription, Vector};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FocusDirection {
@@ -35,20 +36,22 @@ fn key_pressed(key: Key, modifiers: Modifiers) -> Option<Message> {
 // stale widget IDs survive navigation. Wrap without an unfocused intermediate step.
 pub(super) fn focus(direction: FocusDirection) -> impl Operation<Message> {
     let next: fn(operation::focusable::Count) -> FocusAt = match direction {
-        FocusDirection::Next => |count| FocusAt {
-            target: count
-                .focused
-                .and_then(|n| n.checked_add(1))
-                .filter(|n| *n < count.total)
-                .unwrap_or(0),
-            current: 0,
+        FocusDirection::Next => |count| {
+            FocusAt::new(
+                count
+                    .focused
+                    .and_then(|n| n.checked_add(1))
+                    .filter(|n| *n < count.total)
+                    .unwrap_or(0),
+            )
         },
-        FocusDirection::Previous => |count| FocusAt {
-            target: count
-                .focused
-                .and_then(|n| n.checked_sub(1))
-                .unwrap_or_else(|| count.total.saturating_sub(1)),
-            current: 0,
+        FocusDirection::Previous => |count| {
+            FocusAt::new(
+                count
+                    .focused
+                    .and_then(|n| n.checked_sub(1))
+                    .unwrap_or_else(|| count.total.saturating_sub(1)),
+            )
         },
     };
     operation::then(operation::focusable::count(), next)
@@ -58,20 +61,78 @@ pub(super) fn focus(direction: FocusDirection) -> impl Operation<Message> {
 struct FocusAt {
     target: usize,
     current: usize,
+    region: Option<Rectangle>,
+    ancestors: Vec<reveal::Scroll>,
+    pending_scroll: Option<reveal::Scroll>,
+    scroll_count: usize,
+    reveal: Option<reveal::Target>,
+}
+
+impl FocusAt {
+    fn new(target: usize) -> Self {
+        Self {
+            target,
+            current: 0,
+            region: None,
+            ancestors: Vec::new(),
+            pending_scroll: None,
+            scroll_count: 0,
+            reveal: None,
+        }
+    }
 }
 
 impl Operation<Message> for FocusAt {
     fn container(
         &mut self,
-        _id: Option<&Id>,
-        _bounds: Rectangle,
+        id: Option<&Id>,
+        bounds: Rectangle,
         children: &mut dyn FnMut(&mut dyn Operation<Message>),
     ) {
+        let previous = self.region;
+        if crate::focus_region::is_region(id) {
+            self.region = Some(bounds);
+        }
+        let scroll = self.pending_scroll.take();
+        if let Some(scroll) = scroll {
+            self.ancestors.push(scroll);
+        }
         children(self);
+        if scroll.is_some() {
+            let _ = self.ancestors.pop();
+        }
+        self.region = previous;
+    }
+
+    fn scrollable(
+        &mut self,
+        _state: &mut dyn operation::Scrollable,
+        _id: Option<&Id>,
+        bounds: Rectangle,
+        content: Rectangle,
+        translation: Vector,
+    ) {
+        self.pending_scroll = Some(reveal::Scroll {
+            index: self.scroll_count,
+            bounds,
+            content,
+            translation,
+        });
+        self.scroll_count = self.scroll_count.saturating_add(1);
+    }
+
+    fn finish(&self) -> operation::Outcome<Message> {
+        self.reveal
+            .as_ref()
+            .map_or(operation::Outcome::None, reveal::Target::reveal)
     }
 
     fn focusable(&mut self, state: &mut dyn operation::Focusable, _id: Option<&Id>) {
         if self.current == self.target {
+            self.reveal = self.region.map(|bounds| reveal::Target {
+                bounds,
+                ancestors: self.ancestors.clone(),
+            });
             if !state.is_focused() {
                 state.focus();
             }
