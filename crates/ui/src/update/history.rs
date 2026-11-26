@@ -26,6 +26,7 @@ impl Desktop {
                 self.commit_details = None;
                 self.conflict_review = None;
                 self.side_resolution_review = None;
+                self.hunk_review = None;
                 self.merge_preview = None;
                 self.rebase_preview = None;
                 self.detail = if show {

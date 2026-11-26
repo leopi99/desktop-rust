@@ -9,6 +9,10 @@ use iced::Task;
 #[derive(Debug)]
 pub(super) enum Event {
     Select(FileChange),
+    ReviewHunks(FileChange),
+    HunksReviewed(Result<Box<crate::HunkReview>, String>),
+    StageHunk(usize),
+    CancelHunks,
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
     ReviewConflictSide(FileChange, ConflictSide),
@@ -35,6 +39,7 @@ impl Desktop {
                     self.loading = true;
                     self.conflict_review = None;
                     self.side_resolution_review = None;
+                    self.hunk_review = None;
                     self.detail = format!("Loading {}…", change.path.display());
                     return worker(
                         move || desktop_git::diff(&path, &change),
@@ -42,7 +47,49 @@ impl Desktop {
                     );
                 }
             }
+            Event::ReviewHunks(change) if !self.loading && self.panel == crate::Panel::Changes => {
+                if let Some(snapshot) = &self.snapshot {
+                    let path = snapshot.repository.path.clone();
+                    self.conflict_review = None;
+                    self.side_resolution_review = None;
+                    self.hunk_review = None;
+                    self.loading = true;
+                    self.detail = String::from("Reviewing complete unstaged hunks…");
+                    return worker(
+                        move || desktop_git::review_hunks(&path, &change),
+                        Message::HunksReviewed,
+                    );
+                }
+            }
+            Event::HunksReviewed(result) => {
+                self.loading = false;
+                self.conflict_review = None;
+                self.side_resolution_review = None;
+                self.hunk_review = None;
+                match result {
+                    Ok(review) => self.hunk_review = Some(std::sync::Arc::new(*review)),
+                    Err(error) => self.detail = format!("Unable to review hunks: {error}"),
+                }
+            }
+            Event::StageHunk(index) if !self.loading && self.panel == crate::Panel::Changes => {
+                if self
+                    .hunk_review
+                    .as_ref()
+                    .is_some_and(|review| index < review.hunks.len())
+                {
+                    if let Some(review) = self.hunk_review.take() {
+                        self.loading = true;
+                        self.notice = String::from("Staging reviewed hunk…");
+                        return worker(
+                            move || desktop_git::stage_hunk(&review, index),
+                            |result| Message::Wrote(Operation::Index, result),
+                        );
+                    }
+                }
+            }
+            Event::CancelHunks if !self.loading => self.hunk_review = None,
             Event::DiffLoaded(result) => {
+                self.hunk_review = None;
                 self.loading = false;
                 self.detail = match result {
                     Ok(diff) => format!(
@@ -66,6 +113,7 @@ impl Desktop {
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
                     self.side_resolution_review = None;
+                    self.hunk_review = None;
                     self.loading = true;
                     self.detail = format!("Reviewing conflict: {}", change.path.display());
                     return worker(
@@ -79,6 +127,7 @@ impl Desktop {
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
                     self.side_resolution_review = None;
+                    self.hunk_review = None;
                     self.loading = true;
                     self.detail = String::from("Loading read-only index side…");
                     return worker(
@@ -92,6 +141,7 @@ impl Desktop {
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
                     self.side_resolution_review = None;
+                    self.hunk_review = None;
                     self.loading = true;
                     self.detail = String::from("Reviewing side replacement/deletion…");
                     return worker(
@@ -104,6 +154,7 @@ impl Desktop {
                 self.loading = false;
                 self.conflict_review = None;
                 self.side_resolution_review = None;
+                self.hunk_review = None;
                 match result {
                     Ok(review) => {
                         let current = working_display(&review.working);
@@ -131,6 +182,7 @@ impl Desktop {
                 self.loading = false;
                 self.conflict_review = None;
                 self.side_resolution_review = None;
+                self.hunk_review = None;
                 self.detail = match result {
                     Ok(preview) => {
                         let side = match preview.side {
@@ -160,6 +212,7 @@ impl Desktop {
             }
             Event::ConflictReviewed(result) => {
                 self.side_resolution_review = None;
+                self.hunk_review = None;
                 self.loading = false;
                 match result {
                     Ok(review) => {
@@ -188,6 +241,7 @@ impl Desktop {
                     Err(error) => {
                         self.conflict_review = None;
                         self.side_resolution_review = None;
+                        self.hunk_review = None;
                         self.detail = format!("Unable to review conflict: {error}");
                     }
                 }
@@ -238,7 +292,10 @@ impl Desktop {
                     );
                 }
             }
-            Event::Select(..)
+            Event::ReviewHunks(..)
+            | Event::StageHunk(..)
+            | Event::CancelHunks
+            | Event::Select(..)
             | Event::ReviewConflict(..)
             | Event::ReviewConflictSide(..)
             | Event::RequestConflictSideResolution(..)

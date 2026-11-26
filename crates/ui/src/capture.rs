@@ -13,6 +13,7 @@ pub(super) struct Start {
     pub(super) capture: Option<PathBuf>,
     panel: Panel,
     review_delete: bool,
+    review_hunks: bool,
     review_side: Option<ConflictSide>,
     pub(super) size: iced::Size,
 }
@@ -28,13 +29,14 @@ impl Start {
             capture: None,
             panel: Panel::Changes,
             review_delete: false,
+            review_hunks: false,
             review_side: None,
             size: iced::Size::new(1200.0, 800.0),
         };
         let mut args = args.into_iter();
         while let Some(flag) = args.next() {
             if flag == "--help" {
-                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
+                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|hunk-review|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
                 return Ok(None);
             }
             if !["--repository", "--panel", "--size", "--capture"]
@@ -49,15 +51,19 @@ impl Start {
                 Some("--capture") => start.capture = Some(value.into()),
                 Some("--panel") => {
                     start.review_delete = value == "branch-delete-review";
+                    start.review_hunks = value == "hunk-review";
                     start.review_side = match value.to_str() {
                         Some("conflict-ours-review") => Some(ConflictSide::Ours),
                         Some("conflict-theirs-review") => Some(ConflictSide::Theirs),
                         _ => None,
                     };
                     start.panel = match value.to_str() {
-                        Some("changes" | "conflict-ours-review" | "conflict-theirs-review") => {
-                            Panel::Changes
-                        }
+                        Some(
+                            "changes"
+                            | "hunk-review"
+                            | "conflict-ours-review"
+                            | "conflict-theirs-review",
+                        ) => Panel::Changes,
                         Some("history") => Panel::History,
                         Some("branches" | "branch-delete-review") => Panel::Branches,
                         Some("remotes") => Panel::Remotes,
@@ -82,7 +88,7 @@ impl Start {
                 _ => unreachable!(),
             }
         }
-        if (start.review_delete || start.review_side.is_some())
+        if (start.review_delete || start.review_hunks || start.review_side.is_some())
             && (start.capture.is_none() || start.repository.is_none())
         {
             return Err("Review captures require --repository and --capture".into());
@@ -121,6 +127,24 @@ impl Start {
                 let remote = snapshot.remotes.first().cloned();
                 app.select_remote(remote);
             }
+        }
+        if self.review_hunks {
+            let snapshot = app
+                .snapshot
+                .as_ref()
+                .ok_or("Hunk capture requires a repository")?;
+            let change = snapshot
+                .changes
+                .iter()
+                .find(|change| {
+                    change.worktree == 'M'
+                        && matches!(change.index, ' ' | 'M')
+                        && change.original_path.is_none()
+                })
+                .ok_or("Hunk capture needs an existing tracked text modification")?;
+            let review = desktop_git::review_hunks(&snapshot.repository.path, change)?;
+            // Capture prepares only; it never sends StageHunk.
+            let _ = app.update(Message::HunksReviewed(Ok(review)));
         }
         if let Some(side) = self.review_side {
             let snapshot = app
@@ -244,6 +268,29 @@ mod tests {
         assert_eq!(start.panel, Panel::History);
         assert_eq!(start.size, iced::Size::new(960.0, 640.0));
         assert_eq!(start.repository, Some(PathBuf::from("/tmp/my repository")));
+    }
+
+    #[test]
+    fn hunk_capture_requires_both_repository_and_destination() {
+        for args in [
+            vec!["--panel", "hunk-review"],
+            vec!["--panel", "hunk-review", "--repository", "/tmp/repo"],
+            vec!["--panel", "hunk-review", "--capture", "/tmp/new-hunks.png"],
+        ] {
+            assert!(parse(&args).is_err());
+        }
+        let start = parse(&[
+            "--panel",
+            "hunk-review",
+            "--repository",
+            "/tmp/repo",
+            "--capture",
+            "/tmp/new-hunks.png",
+        ])
+        .unwrap()
+        .unwrap();
+        assert!(start.review_hunks);
+        assert_eq!(start.panel, Panel::Changes);
     }
 
     #[test]

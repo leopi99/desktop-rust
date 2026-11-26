@@ -13,7 +13,7 @@ use std::{
 
 const MAX_TEXT: u64 = 8 * 1024 * 1024;
 
-fn working_content(root: &Path, relative: &Path) -> io::Result<ConflictWorkingContent> {
+pub(super) fn working_content(root: &Path, relative: &Path) -> io::Result<ConflictWorkingContent> {
     let mut parent = relative.parent();
     while let Some(component) = parent.filter(|p| !p.as_os_str().is_empty()) {
         match std::fs::symlink_metadata(root.join(component)) {
@@ -307,7 +307,7 @@ pub fn inspect_conflict_side(
     })
 }
 
-fn side_policy(root: &Path, path: &Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
+pub(super) fn conversion_policy(root: &Path, path: &Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
     let names = [
         "filter",
         "ident",
@@ -340,7 +340,7 @@ fn side_policy(root: &Path, path: &Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
         }
         if name != "conflict-marker-size" && !matches!(record[2], b"unspecified" | b"unset") {
             return Err(io::Error::other(
-                "Use Git for side selection with filters, text/EOL, ident or encoding conversions",
+                "Use external Git for files with filters, text/EOL, ident or encoding conversions",
             ));
         }
     }
@@ -348,10 +348,16 @@ fn side_policy(root: &Path, path: &Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
         root,
         &["config", "--null", "--type=bool", "--get", "core.autocrlf"],
         64 * 1024,
-    ).map_err(|error| io::Error::new(error.kind(), format!("Cannot establish side-selection line-ending policy; use Git for conversion settings: {error}")))?;
+    )
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("Cannot establish conversion policy; use external Git: {error}"),
+        )
+    })?;
     if autocrlf.as_deref().is_some_and(|value| value != b"false\0") {
         return Err(io::Error::other(
-            "Use Git for side selection with automatic line-ending conversion",
+            "Use external Git for files with automatic line-ending conversion",
         ));
     }
     let settings = super::read_output::optional(root, &["config", "--null", "--get-regexp", "^core\\.(autocrlf|eol|safecrlf|filemode|checkroundtripencoding|sparsecheckout|sparsecheckoutcone|hookspath)$"], 64 * 1024)?.unwrap_or_default();
@@ -395,7 +401,7 @@ pub fn review_conflict_side_resolution(
             return Err(io::Error::other("The file appears externally resolved; review and stage the edited contents instead"));
         }
     }
-    let (attributes, settings) = side_policy(root, &selected.path)?;
+    let (attributes, settings) = conversion_policy(root, &selected.path)?;
     let target = match &preview.oid {
         None => ConflictWorkingContent::Deleted,
         Some(oid) => ConflictWorkingContent::File {
@@ -485,7 +491,7 @@ fn apply_reviewed_side(review: &ConflictSideResolutionReview) -> io::Result<Stri
             ],
             None,
         )?;
-        let (attributes, settings) = side_policy(root, &selected.path)?;
+        let (attributes, settings) = conversion_policy(root, &selected.path)?;
         if super::commit_basis(root)? != review.basis
             || working_content(root, &selected.path)? != review.selected
             || attributes != review.attributes

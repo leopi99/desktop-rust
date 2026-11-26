@@ -29,6 +29,7 @@ impl Desktop {
                 }
                 self.conflict_review = None;
                 self.side_resolution_review = None;
+                self.hunk_review = None;
                 self.merge_preview = None;
                 self.rebase_preview = None;
                 self.abort_merge_pending = false;
@@ -88,6 +89,7 @@ impl Desktop {
             }
             Event::Refreshed(result) => {
                 self.side_resolution_review = None;
+                self.hunk_review = None;
                 self.delete_branch_pending = None;
                 self.loading = false;
                 match result {

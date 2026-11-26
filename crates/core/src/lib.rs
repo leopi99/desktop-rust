@@ -64,6 +64,27 @@ pub struct FileDiff {
     pub unstaged: String,
 }
 
+/// Complete review authorizing one unchanged working-tree hunk to be staged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HunkReview {
+    /// Repository whose index will be updated.
+    pub repository: Repository,
+    /// Exact observed tracked-file status and native path.
+    pub change: FileChange,
+    /// Index, HEAD and operation state captured for this review.
+    pub basis: CommitBasis,
+    /// Complete working bytes/mode, bounded to 8 MiB by the adapter.
+    pub working: ConflictWorkingContent,
+    /// Effective conversion attributes, including conflict-marker settings.
+    pub attributes: Vec<u8>,
+    /// Relevant checkout/index settings retained for freshness.
+    pub settings: Vec<u8>,
+    /// Exact UTF-8 Git patch header, including quoted native path spelling.
+    pub header: String,
+    /// Complete context-bearing hunks; their vector index identifies a choice.
+    pub hunks: Vec<String>,
+}
+
 impl FileChange {
     /// Whether Git reports an unmerged index entry.
     pub fn is_conflicted(&self) -> bool {

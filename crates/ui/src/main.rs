@@ -7,7 +7,7 @@ mod update;
 use desktop_core::{
     CommitDetails, CommitFile, CommitSummary, ConflictContent, ConflictReview, ConflictSide,
     ConflictSideContent, ConflictSidePreview, ConflictSideResolutionReview, ConflictWorkingContent,
-    FileChange, FileDiff, GitRuntime, LocalBranch, MergeKind, MergePreview, RebaseKind,
+    FileChange, FileDiff, GitRuntime, HunkReview, LocalBranch, MergeKind, MergePreview, RebaseKind,
     RebasePreview, Remote, RemoteAction, RemoteUrlKind, RepositorySnapshot, StashEntry,
 };
 use desktop_git::TransferControl;
@@ -65,6 +65,7 @@ struct Desktop {
     remote_after_refresh: Option<std::ffi::OsString>,
     show_remote_settings: bool,
     conflict_review: Option<ConflictReview>,
+    hunk_review: Option<std::sync::Arc<HunkReview>>,
     side_resolution_review: Option<std::sync::Arc<ConflictSideResolutionReview>>,
     selected_stash: Option<StashEntry>,
     stash_message: String,
@@ -97,6 +98,10 @@ enum Message {
     CreateBranchAtCommit,
     OlderCommitsLoaded(Result<Vec<CommitSummary>, String>),
     Select(FileChange),
+    ReviewHunks(FileChange),
+    HunksReviewed(Result<HunkReview, String>),
+    StageHunk(usize),
+    CancelHunks,
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
     ReviewConflictSide(FileChange, ConflictSide),
@@ -1338,6 +1343,101 @@ mod tests {
         assert!(!app.abort_rebase_pending);
         assert!(app.rebase_preview.is_some());
     }
+    fn hunk_app() -> Desktop {
+        let mut app = loaded();
+        let snapshot = app.snapshot.as_ref().unwrap();
+        let review = HunkReview {
+            repository: snapshot.repository.clone(),
+            change: FileChange {
+                path: "file".into(),
+                original_path: None,
+                index: ' ',
+                worktree: 'M',
+            },
+            basis: snapshot.commit_basis.clone(),
+            working: ConflictWorkingContent::File {
+                bytes: b"edited\n".to_vec(),
+                executable: false,
+            },
+            attributes: Vec::new(),
+            settings: Vec::new(),
+            header: "header".into(),
+            hunks: vec!["@@ -1 +1 @@\n-base\n+edited\n".into()],
+        };
+        let _ = app.update(Message::HunksReviewed(Ok(review)));
+        app
+    }
+
+    #[test]
+    fn staging_a_hunk_consumes_the_review_and_preserves_drafts_after_failure_refresh() {
+        let mut app = hunk_app();
+        let _ = app.update(Message::StageHunk(9));
+        assert!(!app.loading);
+        assert!(app.hunk_review.is_some());
+        let _ = app.update(Message::StageHunk(0));
+        assert!(app.loading);
+        assert!(app.hunk_review.is_none());
+        let _ = app.update(Message::StageHunk(0));
+        let _ = app.update(Message::CancelHunks);
+        let _ = app.update(Message::PanelSelected(Panel::Branches));
+        assert!(app.loading);
+        assert_eq!(app.panel, Panel::Changes);
+        let _ = app.update(Message::Wrote(Operation::Index, Err("index locked".into())));
+        assert!(app.loading);
+        assert!(app.notice.contains("index locked"));
+        assert!(app.hunk_review.is_none());
+        let _ = app.update(Message::Refreshed(Err("refresh failed".into())));
+        assert!(!app.loading);
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+    }
+
+    #[test]
+    fn navigation_selection_preview_and_refresh_revoke_hunk_authority() {
+        for action in 0..5 {
+            let mut app = hunk_app();
+            let change = app.hunk_review.as_ref().unwrap().change.clone();
+            let message = match action {
+                0 => Message::CancelHunks,
+                1 => Message::PanelSelected(Panel::Branches),
+                2 => Message::Select(change),
+                3 => Message::Refreshed(Err("refresh failed".into())),
+                _ => Message::DiffLoaded(Ok(FileDiff {
+                    staged: String::new(),
+                    unstaged: "display only".into(),
+                })),
+            };
+            let _ = app.update(message);
+            assert!(app.hunk_review.is_none(), "{action}");
+            assert_eq!(app.summary, "Summary");
+            assert_eq!(app.description, "Details");
+        }
+    }
+
+    #[test]
+    fn ordinary_diff_and_off_panel_or_busy_requests_cannot_stage_hunks() {
+        let mut app = loaded();
+        let _ = app.update(Message::StageHunk(0));
+        assert!(!app.loading);
+        for panel in [Panel::History, Panel::Branches] {
+            let mut app = hunk_app();
+            app.panel = panel;
+            let change = app.hunk_review.as_ref().unwrap().change.clone();
+            let _ = app.update(Message::ReviewHunks(change));
+            let _ = app.update(Message::StageHunk(0));
+            assert!(!app.loading);
+            assert!(app.hunk_review.is_some());
+        }
+        let mut app = hunk_app();
+        app.loading = true;
+        let change = app.hunk_review.as_ref().unwrap().change.clone();
+        let _ = app.update(Message::ReviewHunks(change));
+        let _ = app.update(Message::StageHunk(0));
+        let _ = app.update(Message::CancelHunks);
+        assert!(app.loading);
+        assert!(app.hunk_review.is_some());
+    }
+
     fn history_commit(number: usize) -> CommitSummary {
         CommitSummary {
             oid: format!("{number:040x}"),

@@ -57,6 +57,14 @@ impl Desktop {
                 self.update_history(history::Event::OlderCommitsLoaded(result))
             }
             Message::Select(change) => self.update_changes(changes::Event::Select(change)),
+            Message::ReviewHunks(change) => {
+                self.update_changes(changes::Event::ReviewHunks(change))
+            }
+            Message::HunksReviewed(result) => {
+                self.update_changes(changes::Event::HunksReviewed(result.map(Box::new)))
+            }
+            Message::StageHunk(index) => self.update_changes(changes::Event::StageHunk(index)),
+            Message::CancelHunks => self.update_changes(changes::Event::CancelHunks),
             Message::DiffLoaded(result) => self.update_changes(changes::Event::DiffLoaded(result)),
             Message::ReviewConflict(change) => {
                 self.update_changes(changes::Event::ReviewConflict(change))

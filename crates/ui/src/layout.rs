@@ -68,6 +68,16 @@ impl Desktop {
                         .push(choose_theirs);
                 } else {
                     files = files.push(row![stage, unstage].spacing(6));
+                    if change.worktree == 'M'
+                        && matches!(change.index, ' ' | 'M')
+                        && change.original_path.is_none()
+                    {
+                        let mut hunks = button("Review unstaged hunks");
+                        if !self.loading {
+                            hunks = hunks.on_press(Message::ReviewHunks(change.clone()));
+                        }
+                        files = files.push(hunks);
+                    }
                 }
             }
         }
@@ -384,6 +394,32 @@ impl Desktop {
                     .push(button("Cancel transfer").on_press(Message::CancelTransfer));
             }
         }
+        let changes_detail: Element<'_, Message> = if let Some(review) = &self.hunk_review {
+            let mut close = button("Close hunk review");
+            if !self.loading {
+                close = close.on_press(Message::CancelHunks);
+            }
+            let mut contents = column![
+                text(format!("Unstaged hunks: {}", review.change.path.display())),
+                text("Stage one block; keep the working file and other blocks unchanged."),
+                close
+            ]
+            .spacing(8);
+            for (index, hunk) in review.hunks.iter().enumerate() {
+                let mut stage = button(text(format!("Stage hunk {}", index + 1)));
+                if !self.loading {
+                    stage = stage.on_press(Message::StageHunk(index));
+                }
+                contents = contents
+                    .push(text(hunk).font(iced::Font::MONOSPACE))
+                    .push(stage);
+            }
+            scrollable(contents).width(Length::FillPortion(3)).into()
+        } else {
+            scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
+                .width(Length::FillPortion(3))
+                .into()
+        };
         let content: Element<'_, Message> = if self.show_history {
             let mut history = column![text("Commits").size(20)].spacing(6);
             if self.history_commits.is_empty() {
@@ -431,8 +467,7 @@ impl Desktop {
             column![
                 row![
                     scrollable(files).width(Length::FillPortion(1)),
-                    scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
-                        .width(Length::FillPortion(3))
+                    changes_detail
                 ]
                 .spacing(16)
                 .height(Length::Fill),
