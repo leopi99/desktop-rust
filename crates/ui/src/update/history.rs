@@ -20,6 +20,7 @@ impl Desktop {
     pub(super) fn update_history(&mut self, event: Event) -> Task<Message> {
         match event {
             Event::ShowHistory(show) if !self.loading => {
+                self.selected_change = None;
                 self.delete_branch_pending = None;
                 self.panel = if show { Panel::History } else { Panel::Changes };
                 self.show_history = show;

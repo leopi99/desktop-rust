@@ -1,34 +1,48 @@
+mod shell;
 use super::{
     clip::clip,
     focus_region::{field, FieldId},
     navigation::{file_button, review_button, FileAction, ReviewTarget},
     Desktop, Message, Panel,
 };
+use crate::appearance;
 use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
-use iced::widget::{button, column, pick_list, row, scrollable, text, text_input};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length};
 
 impl Desktop {
     pub(super) fn view(&self) -> Element<'_, Message> {
-        let mut files = column![text("Changed files").size(20)].spacing(6);
+        let mut files = column![].spacing(0).width(Length::Fill);
+        let mut file_actions = column![].spacing(6).width(Length::Fill);
         if let Some(snapshot) = &self.snapshot {
             if snapshot.changes.is_empty() {
                 files = files.push(text("Working tree clean"));
             }
             for change in &snapshot.changes {
-                let label = format!(
-                    "{}{}  {}",
-                    change.index,
-                    change.worktree,
-                    change.path.display()
-                );
-                let control = file_button(
-                    label,
+                let active = self.selected_change.as_ref() == Some(change);
+                let status = if change.is_conflicted() {
+                    "!"
+                } else if change.index == 'D' || change.worktree == 'D' {
+                    "−"
+                } else if change.index == 'R' {
+                    "R"
+                } else if change.index == 'A' || change.worktree == '?' {
+                    "+"
+                } else {
+                    "M"
+                };
+                let control = crate::navigation::file_row(
+                    change.path.display().to_string(),
+                    status.into(),
                     &snapshot.repository.path,
                     change,
-                    FileAction::Diff,
+                    active,
                     !self.loading,
                 );
+                files = files.push(clip(control));
+                if !active {
+                    continue;
+                }
                 let mut stage = button("Stage");
                 let mut unstage = button("Unstage");
                 if !self.loading && change.can_stage() {
@@ -37,7 +51,7 @@ impl Desktop {
                 if !self.loading && change.can_unstage() {
                     unstage = unstage.on_press(Message::Unstage(change.clone()));
                 }
-                files = files.push(control);
+                let mut actions = row![].spacing(6);
                 if change.is_conflicted() {
                     let review = file_button(
                         "Review conflict",
@@ -73,14 +87,14 @@ impl Desktop {
                                 ConflictSide::Theirs,
                             ));
                     }
-                    files = files
+                    actions = actions
                         .push(review)
                         .push(ours)
                         .push(theirs)
                         .push(choose_ours)
                         .push(choose_theirs);
                 } else {
-                    files = files.push(row![stage, unstage].spacing(6));
+                    actions = actions.push(stage).push(unstage);
                     if change.can_review_unstaged_hunks() {
                         let hunks = file_button(
                             "Review unstaged hunks",
@@ -89,7 +103,7 @@ impl Desktop {
                             FileAction::Hunks(crate::HunkSide::Unstaged),
                             !self.loading,
                         );
-                        files = files.push(hunks);
+                        actions = actions.push(hunks);
                     }
                 }
                 if change.can_review_staged_hunks() {
@@ -100,8 +114,9 @@ impl Desktop {
                         FileAction::Hunks(crate::HunkSide::Staged),
                         !self.loading,
                     );
-                    files = files.push(hunks);
+                    actions = actions.push(hunks);
                 }
+                file_actions = file_actions.push(actions);
             }
         }
         if let Some(review) = &self.conflict_review {
@@ -109,7 +124,7 @@ impl Desktop {
             if !self.loading && review.marker_count == 0 {
                 resolve = resolve.on_press(Message::ResolveConflict);
             }
-            files = files
+            file_actions = file_actions
                 .push(text(format!("Reviewed: {}", review.change.path.display())))
                 .push(resolve);
         }
@@ -129,7 +144,7 @@ impl Desktop {
             if !self.loading {
                 apply = apply.on_press(Message::ApplyConflictSideResolution);
             }
-            files = files.push(text(format!(
+            file_actions = file_actions.push(text(format!(
                 "Reviewed {:?}: {}",
                 review.preview.side,
                 review.preview.change.path.display()
@@ -137,14 +152,6 @@ impl Desktop {
             side_confirmation = side_confirmation
                 .push(text(action))
                 .push(row![apply, cancel].spacing(8));
-        }
-        let mut open = button(if self.loading {
-            "Loading…"
-        } else {
-            "Open / Refresh"
-        });
-        if !self.loading {
-            open = open.on_press(Message::Open);
         }
         let mut commit = button(
             if self
@@ -438,10 +445,13 @@ impl Desktop {
                     review.side,
                     review.change.path.display()
                 )),
-                text("Select blocks or changed lines; the working file stays unchanged."),
+                text("Select blocks or changed lines; the working file stays unchanged.")
+                    .size(12)
+                    .color(appearance::MUTED),
                 close
             ]
-            .spacing(8)
+            .spacing(2)
+            .padding(12)
             .width(Length::Fill);
             let line_controls = review.line_selection_available();
             if !line_controls {
@@ -481,7 +491,17 @@ impl Desktop {
                                 !self.loading,
                                 true,
                             );
-                            contents = contents.push(choose);
+                            let background = if row.starts_with('+') {
+                                appearance::ADDED
+                            } else {
+                                appearance::DELETED
+                            };
+                            contents = contents.push(
+                                container(choose)
+                                    .padding([3, 8])
+                                    .width(Length::Fill)
+                                    .style(move |_| appearance::surface(background)),
+                            );
                         } else {
                             contents = contents.push(
                                 text(row.trim_end_matches(['\r', '\n']))
@@ -518,68 +538,31 @@ impl Desktop {
                 apply
             ]
             .spacing(8)
-            .width(Length::FillPortion(3))
+            .width(Length::Fill)
             .into()
+        } else if self.selected_change.is_some() {
+            crate::diff_view::view(&self.detail)
         } else {
-            scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
-                .width(Length::FillPortion(3))
-                .into()
-        };
-        let content: Element<'_, Message> = if self.show_history {
-            let mut history = column![text("Commits").size(20)].spacing(6);
-            if self.history_commits.is_empty() {
-                history = history.push(text("No commits yet"));
-            }
-            for commit in &self.history_commits {
-                let mut control = button(text(format!("{} {}", &commit.oid[..7], commit.subject)));
-                if !self.loading {
-                    control = control.on_press(Message::SelectCommit(commit.clone()));
-                }
-                history = history.push(control);
-            }
-            if self.history_has_more {
-                let mut older = button("Load older commits");
-                if !self.loading {
-                    older = older.on_press(Message::LoadOlderCommits);
-                }
-                history = history.push(older);
-            }
-            let mut committed_files = column![text("Committed files").size(20)].spacing(6);
-            if let Some(details) = &self.commit_details {
-                if details.files.is_empty() {
-                    committed_files =
-                        committed_files.push(text("No changes relative to the first parent"));
-                }
-                for file in &details.files {
-                    let mut control =
-                        button(text(format!("{} {}", file.status, file.path.display())));
-                    if !self.loading {
-                        control = control.on_press(Message::SelectCommitFile(file.clone()));
-                    }
-                    committed_files = committed_files.push(control);
-                }
-            }
-            row![
-                scrollable(history).width(Length::FillPortion(2)),
-                scrollable(committed_files).width(Length::FillPortion(2)),
-                scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
-                    .width(Length::FillPortion(5))
-            ]
-            .spacing(12)
-            .height(Length::Fill)
-            .into()
-        } else {
-            column![
-                row![
-                    scrollable(files).width(Length::FillPortion(1)),
-                    changes_detail
+            let clean = self.snapshot.as_ref().is_some_and(|s| s.changes.is_empty());
+            container(
+                column![
+                    text(if clean {
+                        "No local changes"
+                    } else {
+                        "Review your changes"
+                    })
+                    .size(22),
+                    text(if clean {
+                        "Your working directory is clean."
+                    } else {
+                        "Select a file to view its changes."
+                    })
+                    .size(13)
+                    .color(appearance::MUTED),
                 ]
-                .spacing(16)
-                .height(Length::Fill),
-                side_confirmation
-            ]
-            .spacing(8)
-            .height(Length::Fill)
+                .spacing(12),
+            )
+            .center(Length::Fill)
             .into()
         };
         let commit_controls: Element<'_, Message> = if self.show_history {
@@ -628,71 +611,156 @@ impl Desktop {
                     text_input("Description (optional)", &self.description)
                         .on_input(Message::DescriptionChanged)
                 ),
-                commit
+                commit.width(Length::Fill),
+                text("Commits include all staged changes")
+                    .size(11)
+                    .color(appearance::MUTED)
+            ]
+            .spacing(8)
+            .into()
+        };
+        let content: Element<'_, Message> = if self.show_history {
+            let mut history = column![container(text("Commits").size(12).color(appearance::MUTED))
+                .padding(12)
+                .width(Length::Fill)
+                .style(appearance::sidebar)]
+            .spacing(0)
+            .width(Length::Fill);
+            if self.history_commits.is_empty() {
+                history = history.push(text("No commits yet"));
+            }
+            for commit in &self.history_commits {
+                let active = self
+                    .commit_details
+                    .as_ref()
+                    .is_some_and(|details| details.commit.oid == commit.oid);
+                let mut control =
+                    button(text(format!("{} {}", &commit.oid[..7], commit.subject)).size(13))
+                        .width(Length::Fill)
+                        .padding([9, 12])
+                        .style(move |theme, status| appearance::file(theme, status, active));
+                if !self.loading {
+                    control = control.on_press(Message::SelectCommit(commit.clone()));
+                }
+                history = history.push(control);
+            }
+            if self.history_has_more {
+                let mut older = button("Load older commits");
+                if !self.loading {
+                    older = older.on_press(Message::LoadOlderCommits);
+                }
+                history = history.push(older);
+            }
+            let mut committed_files =
+                column![
+                    container(text("Committed files").size(12).color(appearance::MUTED))
+                        .padding(12)
+                        .width(Length::Fill)
+                        .style(appearance::sidebar)
+                ]
+                .spacing(0)
+                .width(Length::Fill);
+            if let Some(details) = &self.commit_details {
+                if details.files.is_empty() {
+                    committed_files =
+                        committed_files.push(text("No changes relative to the first parent"));
+                }
+                for file in &details.files {
+                    let mut control =
+                        button(text(format!("{} {}", file.status, file.path.display())).size(13))
+                            .width(Length::Fill)
+                            .padding([9, 12])
+                            .style(|theme, status| appearance::file(theme, status, false));
+                    if !self.loading {
+                        control = control.on_press(Message::SelectCommitFile(file.clone()));
+                    }
+                    committed_files = committed_files.push(control);
+                }
+            }
+            let history_body = row![
+                container(scrollable(history).height(Length::Fill))
+                    .width(appearance::SIDEBAR)
+                    .height(Length::Fill)
+                    .style(appearance::pane),
+                container(scrollable(committed_files).height(Length::Fill))
+                    .width(200)
+                    .height(Length::Fill)
+                    .style(appearance::pane),
+                container(
+                    scrollable(text(&self.detail).font(iced::Font::MONOSPACE).size(12))
+                        .height(Length::Fill)
+                )
+                .padding(12)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(appearance::pane)
+            ]
+            .spacing(0)
+            .height(Length::Fill);
+            column![
+                history_body,
+                container(commit_controls)
+                    .padding(12)
+                    .width(Length::Fill)
+                    .style(appearance::sidebar)
             ]
             .spacing(12)
+            .height(Length::Fill)
             .into()
+        } else {
+            let count = self.snapshot.as_ref().map_or(0, |s| s.changes.len());
+            let tabs = row![
+                crate::navigation::button("Changes", Panel::Changes, true, !self.loading),
+                crate::navigation::button("History", Panel::History, false, !self.loading),
+            ];
+            let left = container(
+                column![
+                    tabs,
+                    container(
+                        text(format!("{count} changed files"))
+                            .size(12)
+                            .color(appearance::MUTED)
+                    )
+                    .padding([10, 12]),
+                    scrollable(files).height(Length::Fill),
+                    container(commit_controls)
+                        .padding(12)
+                        .width(Length::Fill)
+                        .style(appearance::sidebar),
+                ]
+                .height(Length::Fill),
+            )
+            .width(appearance::SIDEBAR)
+            .height(Length::Fill)
+            .style(appearance::pane);
+            let file_name = self
+                .selected_change
+                .as_ref()
+                .map(|c| c.path.display().to_string())
+                .unwrap_or_else(|| "No file selected".into());
+            let header = container(text(file_name).size(14))
+                .padding([13, 16])
+                .width(Length::Fill)
+                .style(appearance::sidebar);
+            let right = container(
+                column![
+                    clip(header),
+                    container(file_actions).padding([8, 12]).width(Length::Fill),
+                    clip(changes_detail),
+                    container(side_confirmation)
+                        .padding([4, 12])
+                        .width(Length::Fill),
+                ]
+                .height(Length::Fill),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(appearance::pane);
+            row![left, right].height(Length::Fill).into()
         };
         let mut initialize = button("Create repository");
         if !self.loading && !self.init_destination.trim().is_empty() {
             initialize = initialize.on_press(Message::Initialize);
-        }
-        let mut sidebar = column![
-            text("Desktop Rust").size(24),
-            text("Development preview").size(13),
-            field(
-                FieldId::RepositoryPath,
-                text_input("Repository path", &self.path).on_input(Message::PathChanged)
-            ),
-            open,
-        ]
-        .spacing(12)
-        .width(220);
-        if let Some(snapshot) = &self.snapshot {
-            sidebar = sidebar.push(
-                text(
-                    snapshot
-                        .repository
-                        .path
-                        .file_name()
-                        .unwrap_or(snapshot.repository.path.as_os_str())
-                        .to_string_lossy()
-                        .into_owned(),
-                )
-                .size(18),
-            );
-            sidebar = sidebar.push(
-                text(
-                    snapshot
-                        .commit_basis
-                        .branch
-                        .as_ref()
-                        .map(|b| {
-                            b.to_string_lossy()
-                                .trim_start_matches("refs/heads/")
-                                .to_owned()
-                        })
-                        .unwrap_or_else(|| "Detached HEAD".into()),
-                )
-                .size(14),
-            );
-        }
-        for (label, panel) in [
-            ("Changes", Panel::Changes),
-            ("History", Panel::History),
-            ("Branches", Panel::Branches),
-            ("Remotes", Panel::Remotes),
-            ("Saved changes", Panel::Stashes),
-            ("Create / Clone", Panel::Repository),
-            ("Git", Panel::Git),
-        ] {
-            let active = self.panel == panel;
-            sidebar = sidebar.push(crate::navigation::button(
-                label,
-                panel,
-                active,
-                !self.loading,
-            ));
         }
         let title = match self.panel {
             Panel::Changes => "Changes",
@@ -707,7 +775,9 @@ impl Desktop {
             Panel::Changes | Panel::History => {
                 if self.snapshot.is_none() {
                     column![
-                        text("Open a local repository using its path in the sidebar."),
+                        text("Welcome to Desktop Rust").size(28),
+                        text("Open a repository to start reviewing your changes."),
+                        self.repository_open_controls(),
                         button("Create or clone a repository")
                             .on_press(Message::PanelSelected(Panel::Repository)),
                         text(&self.detail)
@@ -715,10 +785,7 @@ impl Desktop {
                     .spacing(16)
                     .into()
                 } else {
-                    column![content, commit_controls]
-                        .spacing(12)
-                        .height(Length::Fill)
-                        .into()
+                    content
                 }
             }
             Panel::Branches => scrollable(
@@ -758,6 +825,8 @@ impl Desktop {
             }
             Panel::Repository => scrollable(
                 column![
+                    text("Open a local repository").size(20),
+                    self.repository_open_controls(),
                     text("Create a repository").size(20),
                     field(
                         FieldId::InitDestination,
@@ -791,28 +860,26 @@ impl Desktop {
             .height(Length::Fill)
             .into(),
         };
-        let mut workspace = column![text(title).size(24)]
-            .spacing(12)
-            .width(Length::Fill);
-        if self.snapshot.as_ref().is_some_and(|s| {
-            s.commit_basis.merge_heads.is_some() || s.commit_basis.rebase.is_some()
-        }) {
-            let mut manage = button("Manage operation");
-            if !self.loading {
-                manage = manage.on_press(Message::PanelSelected(Panel::Branches));
-            }
-            workspace =
-                workspace.push(row![text("Merge or rebase in progress"), manage].spacing(12));
+        self.shell(title, body, transfer_controls.into())
+    }
+
+    fn repository_open_controls(&self) -> Element<'_, Message> {
+        let mut open = button(if self.loading {
+            "Opening…"
+        } else {
+            "Open / Refresh"
+        });
+        if !self.loading {
+            open = open.on_press(Message::Open);
         }
-        workspace = workspace.push(body);
-        if !self.notice.is_empty() {
-            workspace = workspace.push(scrollable(text(&self.notice)).height(48));
-        }
-        workspace = workspace.push(transfer_controls);
-        row![clip(scrollable(sidebar).height(Length::Fill)), workspace]
-            .spacing(24)
-            .padding(20)
-            .height(Length::Fill)
-            .into()
+        column![
+            field(
+                FieldId::RepositoryPath,
+                text_input("Repository path", &self.path).on_input(Message::PathChanged)
+            ),
+            open,
+        ]
+        .spacing(8)
+        .into()
     }
 }

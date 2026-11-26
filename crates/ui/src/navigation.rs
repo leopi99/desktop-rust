@@ -89,6 +89,83 @@ where
     read_button(label, target, enabled)
 }
 
+pub(super) fn file_row<'a, R>(
+    label: String,
+    status: String,
+    repository: &std::path::Path,
+    change: &crate::FileChange,
+    active: bool,
+    enabled: bool,
+) -> Element<'a, Message, Theme, R>
+where
+    R: iced::advanced::text::Renderer + 'a,
+{
+    let target = Target::File(std::sync::Arc::new(FileTarget {
+        repository: repository.to_path_buf(),
+        change: change.clone(),
+        action: FileAction::Diff,
+    }));
+    let contents = iced::widget::row![
+        iced::widget::text(status).width(30),
+        iced::widget::text(label)
+            .width(Length::Fill)
+            .wrapping(iced::widget::text::Wrapping::None),
+    ]
+    .spacing(4);
+    let mut inner = iced::widget::button(contents)
+        .width(Length::Fill)
+        .padding([9, 12])
+        .style(move |theme, status| crate::appearance::file(theme, status, active));
+    if enabled {
+        inner = inner.on_press(target.message());
+    }
+    crate::focus_region::region(Element::new(Navigation {
+        inner: inner.into(),
+        target,
+        enabled,
+        focus_color: if active {
+            Color::WHITE
+        } else {
+            crate::appearance::BLUE
+        },
+    }))
+}
+
+pub(super) fn toolbar<'a, R>(
+    caption: &'a str,
+    value: String,
+    panel: Panel,
+    enabled: bool,
+) -> Element<'a, Message, Theme, R>
+where
+    R: iced::advanced::text::Renderer + 'a,
+{
+    let content = iced::widget::column![
+        iced::widget::text(caption)
+            .size(11)
+            .color(Color::from_rgb8(175, 184, 193)),
+        iced::widget::text(value)
+            .size(14)
+            .wrapping(iced::widget::text::Wrapping::None),
+    ]
+    .spacing(3)
+    .width(Length::Fill);
+    let mut inner = iced::widget::button(content)
+        .width(Length::Fill)
+        .height(56)
+        .padding([8, 16])
+        .style(crate::appearance::toolbar_button);
+    if enabled {
+        inner = inner.on_press(Message::PanelSelected(panel));
+    }
+    crate::focus_region::region(Element::new(Navigation {
+        inner: inner.into(),
+        target: Target::Panel(panel),
+        enabled,
+        focus_color: Color::WHITE,
+    }))
+}
+
 pub(super) fn review_button<'a, R>(
     label: impl Into<String>,
     review: ReviewTarget,
@@ -108,7 +185,8 @@ fn read_button<'a, R>(
 where
     R: iced::advanced::text::Renderer + 'a,
 {
-    let mut inner = iced::widget::button(iced::widget::text(label.into()));
+    let mut inner = iced::widget::button(iced::widget::text(label.into()))
+        .style(iced::widget::button::secondary);
     if enabled {
         inner = inner.on_press(target.message());
     }
@@ -116,6 +194,7 @@ where
         inner: inner.into(),
         target,
         enabled,
+        focus_color: crate::appearance::BLUE,
     }))
 }
 
@@ -130,11 +209,8 @@ where
 {
     let mut inner: iced::widget::Button<'a, Message, Theme, R> = iced::widget::button(label)
         .width(Length::Fill)
-        .style(if active {
-            iced::widget::button::primary
-        } else {
-            iced::widget::button::secondary
-        });
+        .padding([10, 12])
+        .style(move |theme, status| crate::appearance::tab(theme, status, active));
     if enabled {
         inner = inner.on_press(Message::PanelSelected(panel));
     }
@@ -142,6 +218,7 @@ where
         inner: inner.into(),
         target: Target::Panel(panel),
         enabled,
+        focus_color: crate::appearance::BLUE,
     }))
 }
 
@@ -149,6 +226,7 @@ struct Navigation<'a, R> {
     inner: Element<'a, Message, Theme, R>,
     target: Target,
     enabled: bool,
+    focus_color: Color,
 }
 
 #[derive(Debug)]
@@ -333,7 +411,7 @@ impl<R: iced::advanced::text::Renderer> Widget<Message, Theme, R> for Navigation
                 renderer::Quad {
                     bounds: layout.bounds(),
                     border: Border {
-                        color: theme.palette().text,
+                        color: self.focus_color,
                         width: 2.0,
                         radius: 3.0.into(),
                     },

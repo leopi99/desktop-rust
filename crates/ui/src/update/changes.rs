@@ -53,6 +53,7 @@ impl Desktop {
             }
             Event::Select(change) if !self.loading => {
                 if let Some(snapshot) = &self.snapshot {
+                    self.selected_change = Some(change.clone());
                     let path = snapshot.repository.path.clone();
                     self.loading = true;
                     self.conflict_review = None;
@@ -71,6 +72,7 @@ impl Desktop {
                 if !self.loading && self.panel == crate::Panel::Changes =>
             {
                 if let Some(snapshot) = &self.snapshot {
+                    self.selected_change = Some(change.clone());
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
                     self.side_resolution_review = None;
@@ -98,7 +100,10 @@ impl Desktop {
                 self.selected_hunks.clear();
                 self.selected_lines.clear();
                 match result {
-                    Ok(review) => self.hunk_review = Some(std::sync::Arc::new(*review)),
+                    Ok(review) => {
+                        self.selected_change = Some(review.change.clone());
+                        self.hunk_review = Some(std::sync::Arc::new(*review));
+                    }
                     Err(error) => self.detail = format!("Unable to review hunks: {error}"),
                 }
             }
@@ -190,6 +195,7 @@ impl Desktop {
                 }
             }
             Event::CancelHunks if !self.loading => {
+                self.selected_change = None;
                 self.hunk_review = None;
                 self.selected_hunks.clear();
                 self.selected_lines.clear();
@@ -218,6 +224,7 @@ impl Desktop {
             }
             Event::ReviewConflict(change) if !self.loading => {
                 if let Some(snapshot) = &self.snapshot {
+                    self.selected_change = Some(change.clone());
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
                     self.side_resolution_review = None;
@@ -234,6 +241,7 @@ impl Desktop {
             }
             Event::ReviewConflictSide(change, side) if !self.loading => {
                 if let Some(snapshot) = &self.snapshot {
+                    self.selected_change = Some(change.clone());
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
                     self.side_resolution_review = None;
@@ -250,6 +258,7 @@ impl Desktop {
             }
             Event::RequestConflictSideResolution(change, side) if !self.loading => {
                 if let Some(snapshot) = &self.snapshot {
+                    self.selected_change = Some(change.clone());
                     let path = snapshot.repository.path.clone();
                     self.conflict_review = None;
                     self.side_resolution_review = None;
@@ -276,6 +285,7 @@ impl Desktop {
                         let current = working_display(&review.working);
                         let target = working_display(&review.selected);
                         self.detail = format!("Review {:?} side for {}\nBlob: {}\nConfirming will replace or delete the current working file and stage only this path.\nDuring rebase, ours is rebased-onto; theirs is the replayed commit.\nConfigured Git checkout hooks remain active.\n\nCurrent working version:\n{}\n\nSelected index version:\n{}", review.preview.side, review.preview.change.path.display(), review.preview.oid.as_deref().unwrap_or("(deleted)"), current, target);
+                        self.selected_change = Some(review.preview.change.clone());
                         self.side_resolution_review = Some(std::sync::Arc::new(*review));
                     }
                     Err(error) => self.detail = format!("Unable to review side choice: {error}"),
@@ -292,6 +302,7 @@ impl Desktop {
                 }
             }
             Event::CancelConflictSideResolution if !self.loading => {
+                self.selected_change = None;
                 self.side_resolution_review = None
             }
             Event::ConflictSidePreviewed(result) => {
@@ -303,6 +314,7 @@ impl Desktop {
                 self.selected_lines.clear();
                 self.detail = match result {
                     Ok(preview) => {
+                        self.selected_change = Some(preview.change.clone());
                         let side = match preview.side {
                             ConflictSide::Ours => "Ours — index stage 2",
                             ConflictSide::Theirs => "Theirs — index stage 3",
@@ -356,6 +368,7 @@ impl Desktop {
                         };
                         self.detail = format!("Conflict review: {}\nMarker-like lines remaining: {}\nEdit the file outside the app, then review again.\n\n{}",
                             review.change.path.display(), review.marker_count, preview);
+                        self.selected_change = Some(review.change.clone());
                         self.conflict_review = Some(review);
                     }
                     Err(error) => {

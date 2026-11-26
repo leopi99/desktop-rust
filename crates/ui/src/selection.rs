@@ -31,7 +31,9 @@ pub(super) fn checkbox<'a, R>(
 where
     R: iced::advanced::text::Renderer<Font = iced::Font> + 'a,
 {
-    let mut inner = iced::widget::checkbox(label, checked);
+    let mut inner = iced::widget::checkbox(label, checked)
+        .size(14)
+        .width(Length::Fill);
     if monospace {
         inner = inner.font(iced::Font::MONOSPACE);
     }

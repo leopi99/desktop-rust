@@ -155,6 +155,7 @@ impl Start {
             if self.panel == Panel::Changes {
                 if let Some(change) = snapshot.changes.first() {
                     let diff = desktop_git::diff(&snapshot.repository.path, change)?;
+                    app.selected_change = Some(change.clone());
                     let _ = app.update(Message::DiffLoaded(Ok(diff)));
                 }
             } else if self.panel == Panel::History {

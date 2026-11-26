@@ -1,10 +1,14 @@
 //! Iced entry point and guarded UI state transitions for the Rust preview.
+mod appearance;
 mod capture;
 mod clip;
+mod diff_view;
 mod focus_region;
 mod keyboard;
 mod layout;
 mod navigation;
+#[cfg(test)]
+mod presentation_tests;
 mod selection;
 mod update;
 
@@ -46,6 +50,7 @@ struct Desktop {
     capture_success: std::sync::Arc<std::sync::atomic::AtomicBool>,
     path: String,
     snapshot: Option<RepositorySnapshot>,
+    selected_change: Option<FileChange>,
     detail: String,
     show_history: bool,
     history_commits: Vec<CommitSummary>,
@@ -406,6 +411,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .window(iced::window::Settings {
             size,
             min_size: Some(iced::Size::new(960.0, 640.0)),
+            ..Default::default()
+        })
+        .theme(appearance::theme)
+        .settings(iced::Settings {
+            default_text_size: 13.into(),
             ..Default::default()
         })
         .subscription(keyboard::subscription)

@@ -19,6 +19,7 @@ impl Desktop {
                 return iced::advanced::widget::operate(crate::keyboard::focus(direction))
             }
             Event::PanelSelected(panel) if !self.loading => {
+                self.selected_change = None;
                 self.delete_branch_pending = None;
                 self.panel = panel;
                 self.show_history = panel == Panel::History;

@@ -21,6 +21,7 @@ impl Desktop {
     pub(super) fn update_repository(&mut self, event: Event) -> Task<Message> {
         match event {
             Event::PathChanged(path) if !self.loading => {
+                self.selected_change = None;
                 self.delete_branch_pending = None;
                 self.path = path;
                 self.snapshot = None;
@@ -52,6 +53,7 @@ impl Desktop {
                 self.transfer_progress.clear();
             }
             Event::Open if !self.loading => {
+                self.selected_change = None;
                 self.delete_branch_pending = None;
                 if self.snapshot.is_none() {
                     self.panel = Panel::Changes;
@@ -81,6 +83,7 @@ impl Desktop {
                 );
             }
             Event::Loaded(result) => {
+                self.selected_change = None;
                 self.side_resolution_review = None;
                 self.hunk_review = None;
                 self.selected_hunks.clear();
