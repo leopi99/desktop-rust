@@ -13,6 +13,8 @@ pub(super) enum Event {
     HunksReviewed(Result<Box<crate::HunkReview>, String>),
     StageHunk(usize, crate::HunkSide),
     CancelHunks,
+    ToggleHunk(usize, bool),
+    ApplySelectedHunks(crate::HunkSide),
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
     ReviewConflictSide(FileChange, ConflictSide),
@@ -40,6 +42,7 @@ impl Desktop {
                     self.conflict_review = None;
                     self.side_resolution_review = None;
                     self.hunk_review = None;
+                    self.selected_hunks.clear();
                     self.detail = format!("Loading {}…", change.path.display());
                     return worker(
                         move || desktop_git::diff(&path, &change),
@@ -55,6 +58,7 @@ impl Desktop {
                     self.conflict_review = None;
                     self.side_resolution_review = None;
                     self.hunk_review = None;
+                    self.selected_hunks.clear();
                     self.loading = true;
                     self.detail = format!("Reviewing complete {side:?} hunks…");
                     return worker(
@@ -73,6 +77,7 @@ impl Desktop {
                 self.conflict_review = None;
                 self.side_resolution_review = None;
                 self.hunk_review = None;
+                self.selected_hunks.clear();
                 match result {
                     Ok(review) => self.hunk_review = Some(std::sync::Arc::new(*review)),
                     Err(error) => self.detail = format!("Unable to review hunks: {error}"),
@@ -87,25 +92,49 @@ impl Desktop {
                     .is_some_and(|review| index < review.hunks.len() && review.side == side)
                 {
                     if let Some(review) = self.hunk_review.take() {
-                        self.loading = true;
-                        self.notice = format!("Updating reviewed {side:?} hunk…");
-                        return worker(
-                            move || match side {
-                                crate::HunkSide::Unstaged => {
-                                    desktop_git::stage_hunk(&review, index)
-                                }
-                                crate::HunkSide::Staged => {
-                                    desktop_git::unstage_hunk(&review, index)
-                                }
-                            },
-                            |result| Message::Wrote(Operation::Index, result),
-                        );
+                        return self.dispatch_hunk_selection(review, vec![index], side);
                     }
                 }
             }
-            Event::CancelHunks if !self.loading => self.hunk_review = None,
+            Event::ToggleHunk(index, selected)
+                if !self.loading && self.panel == crate::Panel::Changes =>
+            {
+                if self
+                    .hunk_review
+                    .as_ref()
+                    .is_some_and(|review| index < review.hunks.len())
+                {
+                    if selected {
+                        self.selected_hunks.insert(index);
+                    } else {
+                        self.selected_hunks.remove(&index);
+                    }
+                }
+            }
+            Event::ApplySelectedHunks(side)
+                if !self.loading && self.panel == crate::Panel::Changes =>
+            {
+                if self.hunk_review.as_ref().is_some_and(|review| {
+                    review.side == side
+                        && !self.selected_hunks.is_empty()
+                        && self
+                            .selected_hunks
+                            .iter()
+                            .all(|index| *index < review.hunks.len())
+                }) {
+                    if let Some(review) = self.hunk_review.take() {
+                        let indices = self.selected_hunks.iter().copied().collect();
+                        return self.dispatch_hunk_selection(review, indices, side);
+                    }
+                }
+            }
+            Event::CancelHunks if !self.loading => {
+                self.hunk_review = None;
+                self.selected_hunks.clear();
+            }
             Event::DiffLoaded(result) => {
                 self.hunk_review = None;
+                self.selected_hunks.clear();
                 self.loading = false;
                 self.detail = match result {
                     Ok(diff) => format!(
@@ -130,6 +159,7 @@ impl Desktop {
                     self.conflict_review = None;
                     self.side_resolution_review = None;
                     self.hunk_review = None;
+                    self.selected_hunks.clear();
                     self.loading = true;
                     self.detail = format!("Reviewing conflict: {}", change.path.display());
                     return worker(
@@ -144,6 +174,7 @@ impl Desktop {
                     self.conflict_review = None;
                     self.side_resolution_review = None;
                     self.hunk_review = None;
+                    self.selected_hunks.clear();
                     self.loading = true;
                     self.detail = String::from("Loading read-only index side…");
                     return worker(
@@ -158,6 +189,7 @@ impl Desktop {
                     self.conflict_review = None;
                     self.side_resolution_review = None;
                     self.hunk_review = None;
+                    self.selected_hunks.clear();
                     self.loading = true;
                     self.detail = String::from("Reviewing side replacement/deletion…");
                     return worker(
@@ -171,6 +203,7 @@ impl Desktop {
                 self.conflict_review = None;
                 self.side_resolution_review = None;
                 self.hunk_review = None;
+                self.selected_hunks.clear();
                 match result {
                     Ok(review) => {
                         let current = working_display(&review.working);
@@ -199,6 +232,7 @@ impl Desktop {
                 self.conflict_review = None;
                 self.side_resolution_review = None;
                 self.hunk_review = None;
+                self.selected_hunks.clear();
                 self.detail = match result {
                     Ok(preview) => {
                         let side = match preview.side {
@@ -229,6 +263,7 @@ impl Desktop {
             Event::ConflictReviewed(result) => {
                 self.side_resolution_review = None;
                 self.hunk_review = None;
+                self.selected_hunks.clear();
                 self.loading = false;
                 match result {
                     Ok(review) => {
@@ -258,6 +293,7 @@ impl Desktop {
                         self.conflict_review = None;
                         self.side_resolution_review = None;
                         self.hunk_review = None;
+                        self.selected_hunks.clear();
                         self.detail = format!("Unable to review conflict: {error}");
                     }
                 }
@@ -308,7 +344,9 @@ impl Desktop {
                     );
                 }
             }
-            Event::ReviewHunks(..)
+            Event::ToggleHunk(..)
+            | Event::ApplySelectedHunks(..)
+            | Event::ReviewHunks(..)
             | Event::StageHunk(..)
             | Event::CancelHunks
             | Event::Select(..)
@@ -329,6 +367,24 @@ impl Desktop {
 }
 
 impl Desktop {
+    fn dispatch_hunk_selection(
+        &mut self,
+        review: std::sync::Arc<crate::HunkReview>,
+        indices: Vec<usize>,
+        side: crate::HunkSide,
+    ) -> Task<Message> {
+        self.selected_hunks.clear();
+        self.loading = true;
+        self.notice = format!("Updating {} reviewed {side:?} hunk(s)…", indices.len());
+        worker(
+            move || match side {
+                crate::HunkSide::Unstaged => desktop_git::stage_hunks(&review, &indices),
+                crate::HunkSide::Staged => desktop_git::unstage_hunks(&review, &indices),
+            },
+            |result| Message::Wrote(Operation::Index, result),
+        )
+    }
+
     pub(crate) fn dispatch_write(
         &mut self,
         path: std::path::PathBuf,

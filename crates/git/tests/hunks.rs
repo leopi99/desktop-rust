@@ -510,3 +510,194 @@ fn staged_crlf_eof_and_quoted_paths_reverse_without_writing_the_working_file() {
         }
     }
 }
+
+#[test]
+fn multiple_nonadjacent_hunks_preserve_unselected_blocks_other_paths_and_working_bytes() {
+    for side in [
+        desktop_core::HunkSide::Unstaged,
+        desktop_core::HunkSide::Staged,
+    ] {
+        let f = Fixture::new("file", &contents(&[]), &contents(&[5, 20, 40]));
+        if side == desktop_core::HunkSide::Staged {
+            f.git(&["add", "--all"]);
+        }
+        std::fs::write(f.root.join("other"), b"keep staged").unwrap();
+        f.git(&["add", "--", "other"]);
+        let review = if side == desktop_core::HunkSide::Staged {
+            desktop_git::review_staged_hunks(&f.root, &f.change())
+        } else {
+            desktop_git::review_hunks(&f.root, &f.change())
+        }
+        .unwrap();
+        assert_eq!(review.hunks.len(), 3);
+        if side == desktop_core::HunkSide::Staged {
+            desktop_git::unstage_hunks(&review, &[2, 0]).unwrap();
+        } else {
+            desktop_git::stage_hunks(&review, &[2, 0]).unwrap();
+        }
+        let expected = if side == desktop_core::HunkSide::Staged {
+            contents(&[20])
+        } else {
+            contents(&[5, 40])
+        };
+        assert_eq!(f.index(), expected);
+        assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[5, 20, 40]));
+        assert_eq!(f.git(&["show", ":other"]), b"keep staged");
+        desktop_git::commit(&f.root, "Commit selected index blocks", &f.basis()).unwrap();
+        assert_eq!(f.git(&["show", "HEAD:file"]), expected);
+        assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[5, 20, 40]));
+    }
+}
+
+#[test]
+fn multi_hunk_offsets_handle_selected_insertions_and_unselected_deletions() {
+    let base = String::from_utf8(contents(&[])).unwrap();
+    let working = base
+        .replace("line 005\n", "inserted one\ninserted two\nline 005\n")
+        .replace("line 020\nline 021\n", "")
+        .replace("line 040\n", "line 040 edited\n");
+    for staged in [false, true] {
+        let f = Fixture::new("file", base.as_bytes(), working.as_bytes());
+        if staged {
+            f.git(&["add", "--all"]);
+        }
+        let review = if staged {
+            desktop_git::review_staged_hunks(&f.root, &f.change())
+        } else {
+            desktop_git::review_hunks(&f.root, &f.change())
+        }
+        .unwrap();
+        assert_eq!(review.hunks.len(), 3);
+        let expected = if staged {
+            base.replace("line 020\nline 021\n", "")
+        } else {
+            base.replace("line 005\n", "inserted one\ninserted two\nline 005\n")
+                .replace("line 040\n", "line 040 edited\n")
+        };
+        if staged {
+            desktop_git::unstage_hunks(&review, &[0, 2]).unwrap();
+        } else {
+            desktop_git::stage_hunks(&review, &[0, 2]).unwrap();
+        }
+        assert_eq!(f.index(), expected.as_bytes());
+        assert_eq!(std::fs::read(f.file()).unwrap(), working.as_bytes());
+    }
+}
+
+#[test]
+fn invalid_multiple_selections_and_wrong_directions_never_update_a_prefix() {
+    for staged in [false, true] {
+        let f = Fixture::new("file", &contents(&[]), &contents(&[5, 20, 40]));
+        if staged {
+            f.git(&["add", "--all"]);
+        }
+        let review = if staged {
+            desktop_git::review_staged_hunks(&f.root, &f.change())
+        } else {
+            desktop_git::review_hunks(&f.root, &f.change())
+        }
+        .unwrap();
+        let before = f.basis();
+        for indices in [vec![], vec![0, 0], vec![0, 2, 99], vec![0, 1, 2, 2]] {
+            let result = if staged {
+                desktop_git::unstage_hunks(&review, &indices)
+            } else {
+                desktop_git::stage_hunks(&review, &indices)
+            };
+            assert!(result.is_err());
+            assert_eq!(f.basis(), before);
+            assert_eq!(std::fs::read(f.file()).unwrap(), contents(&[5, 20, 40]));
+        }
+        let result = if staged {
+            desktop_git::stage_hunks(&review, &[0, 2])
+        } else {
+            desktop_git::unstage_hunks(&review, &[0, 2])
+        };
+        assert!(result.is_err());
+        assert_eq!(f.basis(), before);
+    }
+}
+
+#[test]
+fn stale_or_locked_multi_hunk_operations_preserve_the_entire_index_and_working_file() {
+    for staged in [false, true] {
+        for mutation in ["working", "index", "lock"] {
+            let f = Fixture::new("file", &contents(&[]), &contents(&[5, 20, 40]));
+            if staged {
+                f.git(&["add", "--all"]);
+            }
+            let review = if staged {
+                desktop_git::review_staged_hunks(&f.root, &f.change())
+            } else {
+                desktop_git::review_hunks(&f.root, &f.change())
+            }
+            .unwrap();
+            match mutation {
+                "working" => std::fs::write(f.file(), contents(&[5, 21, 40])).unwrap(),
+                "index" => {
+                    std::fs::write(f.root.join("other"), b"external staged").unwrap();
+                    f.git(&["add", "--", "other"]);
+                }
+                _ => std::fs::write(f.root.join(".git/index.lock"), b"fixture lock").unwrap(),
+            }
+            let before = f.basis();
+            let bytes = std::fs::read(f.file()).unwrap();
+            let result = if staged {
+                desktop_git::unstage_hunks(&review, &[0, 2])
+            } else {
+                desktop_git::stage_hunks(&review, &[0, 2])
+            };
+            assert!(result.is_err(), "{mutation}");
+            assert_eq!(f.basis(), before);
+            assert_eq!(std::fs::read(f.file()).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn all_128_reviewed_hunks_can_be_staged_and_unstaged_in_one_selection() {
+    let base = (0..128 * 12)
+        .map(|n| format!("line {n}\n"))
+        .collect::<String>();
+    let work = (0..128 * 12)
+        .map(|n| format!("line {n}{}\n", if n % 12 == 5 { " changed" } else { "" }))
+        .collect::<String>();
+    let f = Fixture::new("file", base.as_bytes(), work.as_bytes());
+    let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+    assert_eq!(review.hunks.len(), 128);
+    let indices = (0..128).rev().collect::<Vec<_>>();
+    desktop_git::stage_hunks(&review, &indices).unwrap();
+    assert_eq!(f.index(), work.as_bytes());
+    let staged = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+    desktop_git::unstage_hunks(&staged, &indices).unwrap();
+    assert_eq!(f.index(), base.as_bytes());
+    assert_eq!(std::fs::read(f.file()).unwrap(), work.as_bytes());
+}
+
+#[cfg(unix)]
+#[test]
+fn multi_hunk_native_paths_and_crlf_bytes_are_preserved_in_both_directions() {
+    use std::os::unix::ffi::OsStrExt;
+    let base = String::from_utf8(contents(&[]))
+        .unwrap()
+        .replace('\n', "\r\n");
+    let work = String::from_utf8(contents(&[5, 20, 40]))
+        .unwrap()
+        .replace('\n', "\r\n");
+    for name in [
+        PathBuf::from(":(glob)*\n\tfile"),
+        PathBuf::from(OsStr::from_bytes(b"multi-\xff")),
+    ] {
+        let f = Fixture::new(name, base.as_bytes(), work.as_bytes());
+        let review = desktop_git::review_hunks(&f.root, &f.change()).unwrap();
+        desktop_git::stage_hunks(&review, &[0, 2]).unwrap();
+        let expected = String::from_utf8(contents(&[5, 40]))
+            .unwrap()
+            .replace('\n', "\r\n");
+        assert_eq!(f.index(), expected.as_bytes());
+        let staged = desktop_git::review_staged_hunks(&f.root, &f.change()).unwrap();
+        desktop_git::unstage_hunks(&staged, &[1, 0]).unwrap();
+        assert_eq!(f.index(), base.as_bytes());
+        assert_eq!(std::fs::read(f.file()).unwrap(), work.as_bytes());
+    }
+}

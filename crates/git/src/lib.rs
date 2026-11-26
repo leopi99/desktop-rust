@@ -12,7 +12,9 @@ mod read_output;
 mod runtime;
 pub use runtime::git_runtime;
 mod hunks;
-pub use hunks::{review_hunks, review_staged_hunks, stage_hunk, unstage_hunk};
+pub use hunks::{
+    review_hunks, review_staged_hunks, stage_hunk, stage_hunks, unstage_hunk, unstage_hunks,
+};
 mod history;
 mod init;
 pub use history::{commit_details, commit_file_diff, commit_history};

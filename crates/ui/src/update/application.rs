@@ -29,6 +29,7 @@ impl Desktop {
                 self.conflict_review = None;
                 self.side_resolution_review = None;
                 self.hunk_review = None;
+                self.selected_hunks.clear();
                 self.merge_preview = None;
                 self.rebase_preview = None;
             }

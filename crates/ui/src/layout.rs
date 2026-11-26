@@ -1,6 +1,6 @@
 use super::{clip::clip, Desktop, Message, Panel};
 use desktop_core::{ConflictSide, FileChange, MergeKind, RebaseKind, RemoteAction};
-use iced::widget::{button, column, pick_list, row, scrollable, text, text_input};
+use iced::widget::{button, checkbox, column, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length};
 
 impl Desktop {
@@ -411,11 +411,16 @@ impl Desktop {
                 close = close.on_press(Message::CancelHunks);
             }
             let mut contents = column![
-                text(format!("{:?} hunks: {}", review.side, review.change.path.display())),
-                text("Change only this index block; keep the working file and other blocks unchanged."),
+                text(format!(
+                    "{:?} hunks: {}",
+                    review.side,
+                    review.change.path.display()
+                )),
+                text("Select blocks; the working file stays unchanged."),
                 close
             ]
-            .spacing(8);
+            .spacing(8)
+            .width(Length::Fill);
             for (index, hunk) in review.hunks.iter().enumerate() {
                 let (label, message) = match review.side {
                     crate::HunkSide::Unstaged => ("Stage", Message::StageHunk(index)),
@@ -425,11 +430,39 @@ impl Desktop {
                 if !self.loading {
                     stage = stage.on_press(message);
                 }
+                let mut selection = checkbox(
+                    format!("Include hunk {}", index + 1),
+                    self.selected_hunks.contains(&index),
+                );
+                if !self.loading {
+                    selection =
+                        selection.on_toggle(move |selected| Message::ToggleHunk(index, selected));
+                }
                 contents = contents
                     .push(text(hunk).font(iced::Font::MONOSPACE))
+                    .push(selection)
                     .push(stage);
             }
-            scrollable(contents).width(Length::FillPortion(3)).into()
+            let label = match review.side {
+                crate::HunkSide::Unstaged => "Stage",
+                crate::HunkSide::Staged => "Unstage",
+            };
+            let mut apply = button(text(format!(
+                "{label} selected ({})",
+                self.selected_hunks.len()
+            )));
+            if !self.loading && !self.selected_hunks.is_empty() {
+                apply = apply.on_press(Message::ApplySelectedHunks(review.side));
+            }
+            column![
+                scrollable(contents)
+                    .height(Length::Fill)
+                    .width(Length::Fill),
+                apply
+            ]
+            .spacing(8)
+            .width(Length::FillPortion(3))
+            .into()
         } else {
             scrollable(text(&self.detail).font(iced::Font::MONOSPACE))
                 .width(Length::FillPortion(3))

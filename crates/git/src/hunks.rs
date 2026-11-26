@@ -1,4 +1,4 @@
-//! Complete context-bearing patch review and index-only staging of one hunk.
+//! Complete context-bearing reviews and index-only updates of selected hunks.
 use desktop_core::{ConflictWorkingContent, FileChange, HunkReview, HunkSide};
 use std::{ffi::OsStr, io, path::Path};
 
@@ -195,7 +195,7 @@ fn review(path: &Path, selected: &FileChange, side: HunkSide) -> io::Result<Hunk
 /// Git/index-lock rejection or changed working contents after application. Refresh
 /// after any write error; no automatic rollback overwrites later edits.
 pub fn stage_hunk(review: &HunkReview, index: usize) -> io::Result<String> {
-    apply_hunk(review, index, HunkSide::Unstaged)
+    stage_hunks(review, &[index])
 }
 
 /// Remove one freshly reviewed staged hunk from the index, working files intact.
@@ -208,10 +208,36 @@ pub fn stage_hunk(review: &HunkReview, index: usize) -> io::Result<String> {
 /// index-write failures, or changed working contents after the operation. Refresh
 /// after a write error; no automatic rollback replaces later edits.
 pub fn unstage_hunk(review: &HunkReview, index: usize) -> io::Result<String> {
-    apply_hunk(review, index, HunkSide::Staged)
+    unstage_hunks(review, &[index])
 }
 
-fn apply_hunk(review: &HunkReview, index: usize, side: HunkSide) -> io::Result<String> {
+/// Stage a nonempty selection of complete hunks with one cached patch application.
+/// Input order is normalized to patch order; duplicate or invalid indices are refused.
+/// The complete review is revalidated once and working files are not written.
+///
+/// # Errors
+///
+/// Returns an error for an empty/duplicate/invalid selection, wrong-side/stale review,
+/// patch-check/index-write failure or changed working contents. External clients and
+/// hooks can race preflight; refresh after a write error, without automatic rollback.
+pub fn stage_hunks(review: &HunkReview, indices: &[usize]) -> io::Result<String> {
+    apply_hunks(review, indices, HunkSide::Unstaged)
+}
+
+/// Unstage selected complete hunks with one reverse cached patch application.
+/// Unselected index blocks, other paths and working files remain outside the patch.
+/// Input order is normalized; empty selections and duplicate/invalid indices fail.
+///
+/// # Errors
+///
+/// Returns an error for invalid selection, wrong-side/stale review, patch-check or
+/// index-write failure, or changed working contents. Preflight does not fence
+/// external clients/hooks; no automatic rollback overwrites later edits.
+pub fn unstage_hunks(review: &HunkReview, indices: &[usize]) -> io::Result<String> {
+    apply_hunks(review, indices, HunkSide::Staged)
+}
+
+fn apply_hunks(review: &HunkReview, indices: &[usize], side: HunkSide) -> io::Result<String> {
     if review.side != side {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -221,14 +247,32 @@ fn apply_hunk(review: &HunkReview, index: usize, side: HunkSide) -> io::Result<S
     let _guard = super::WRITE_LOCK
         .lock()
         .map_err(|_| io::Error::other("Write lock poisoned"))?;
-    let hunk = review.hunks.get(index).ok_or_else(invalid)?;
+    if indices.is_empty() || indices.len() > review.hunks.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Select unique valid hunks before changing the index",
+        ));
+    }
+    let ordered: std::collections::BTreeSet<_> = indices.iter().copied().collect();
+    if ordered.is_empty()
+        || ordered.len() != indices.len()
+        || ordered.iter().any(|index| *index >= review.hunks.len())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Select unique valid hunks before changing the index",
+        ));
+    }
     let root = &review.repository.path;
     if self::review(root, &review.change, side)? != *review {
         return Err(io::Error::other(
             "Hunk review changed; review the matching side again before updating the index",
         ));
     }
-    let patch = format!("{}{hunk}", review.header);
+    let mut patch = review.header.clone();
+    for index in ordered {
+        patch.push_str(&review.hunks[index]);
+    }
     let mut args = vec!["apply", "--cached", "--whitespace=nowarn"];
     if side == HunkSide::Staged {
         args.push("--reverse");
@@ -251,13 +295,13 @@ fn apply_hunk(review: &HunkReview, index: usize, side: HunkSide) -> io::Result<S
         ));
     }
     Ok(format!(
-        "{} hunk {} of {}; working file retained",
+        "{} {} hunk(s) of {}; working file retained",
         if side == HunkSide::Staged {
             "Unstaged"
         } else {
             "Staged"
         },
-        index + 1,
+        indices.len(),
         review.change.path.display()
     ))
 }

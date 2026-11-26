@@ -14,6 +14,7 @@ pub(super) struct Start {
     panel: Panel,
     review_delete: bool,
     review_hunks: Option<HunkSide>,
+    select_hunks: bool,
     review_side: Option<ConflictSide>,
     pub(super) size: iced::Size,
 }
@@ -30,13 +31,14 @@ impl Start {
             panel: Panel::Changes,
             review_delete: false,
             review_hunks: None,
+            select_hunks: false,
             review_side: None,
             size: iced::Size::new(1200.0, 800.0),
         };
         let mut args = args.into_iter();
         while let Some(flag) = args.next() {
             if flag == "--help" {
-                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|hunk-review|hunk-unstage-review|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
+                println!("desktop-rust [--repository PATH] [--panel changes|history|branches|remotes|stash|repository|git|hunk-review|hunk-unstage-review|hunk-selection-review|hunk-unstage-selection-review|branch-delete-review|conflict-ours-review|conflict-theirs-review] [--size WIDTHxHEIGHT] [--capture NEW.png]\nCapture saves only this app's window, then exits. Requires a graphical session.");
                 return Ok(None);
             }
             if !["--repository", "--panel", "--size", "--capture"]
@@ -51,9 +53,15 @@ impl Start {
                 Some("--capture") => start.capture = Some(value.into()),
                 Some("--panel") => {
                     start.review_delete = value == "branch-delete-review";
+                    start.select_hunks = matches!(
+                        value.to_str(),
+                        Some("hunk-selection-review" | "hunk-unstage-selection-review")
+                    );
                     start.review_hunks = match value.to_str() {
-                        Some("hunk-review") => Some(HunkSide::Unstaged),
-                        Some("hunk-unstage-review") => Some(HunkSide::Staged),
+                        Some("hunk-review" | "hunk-selection-review") => Some(HunkSide::Unstaged),
+                        Some("hunk-unstage-review" | "hunk-unstage-selection-review") => {
+                            Some(HunkSide::Staged)
+                        }
                         _ => None,
                     };
                     start.review_side = match value.to_str() {
@@ -66,6 +74,8 @@ impl Start {
                             "changes"
                             | "hunk-review"
                             | "hunk-unstage-review"
+                            | "hunk-selection-review"
+                            | "hunk-unstage-selection-review"
                             | "conflict-ours-review"
                             | "conflict-theirs-review",
                         ) => Panel::Changes,
@@ -161,6 +171,11 @@ impl Start {
             };
             // Capture prepares only; it never sends StageHunk or UnstageHunk.
             let _ = app.update(Message::HunksReviewed(Ok(review)));
+            if self.select_hunks {
+                for index in [0, 2] {
+                    let _ = app.update(Message::ToggleHunk(index, true));
+                }
+            }
         }
         if let Some(side) = self.review_side {
             let snapshot = app
@@ -340,6 +355,29 @@ mod tests {
         .unwrap();
         assert_eq!(start.review_hunks, Some(HunkSide::Staged));
         assert_eq!(start.panel, Panel::Changes);
+    }
+
+    #[test]
+    fn selected_hunk_captures_are_explicit_read_only_review_modes() {
+        for (panel, side) in [
+            ("hunk-selection-review", HunkSide::Unstaged),
+            ("hunk-unstage-selection-review", HunkSide::Staged),
+        ] {
+            assert!(parse(&["--panel", panel]).is_err());
+            assert!(parse(&["--panel", panel, "--repository", "/tmp/repo"]).is_err());
+            let start = parse(&[
+                "--panel",
+                panel,
+                "--repository",
+                "/tmp/repo",
+                "--capture",
+                "/tmp/new-selection.png",
+            ])
+            .unwrap()
+            .unwrap();
+            assert!(start.select_hunks);
+            assert_eq!(start.review_hunks, Some(side));
+        }
     }
 
     #[test]

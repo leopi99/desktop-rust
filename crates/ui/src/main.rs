@@ -66,6 +66,7 @@ struct Desktop {
     show_remote_settings: bool,
     conflict_review: Option<ConflictReview>,
     hunk_review: Option<std::sync::Arc<HunkReview>>,
+    selected_hunks: std::collections::BTreeSet<usize>,
     side_resolution_review: Option<std::sync::Arc<ConflictSideResolutionReview>>,
     selected_stash: Option<StashEntry>,
     stash_message: String,
@@ -104,6 +105,8 @@ enum Message {
     StageHunk(usize),
     UnstageHunk(usize),
     CancelHunks,
+    ToggleHunk(usize, bool),
+    ApplySelectedHunks(HunkSide),
     DiffLoaded(Result<FileDiff, String>),
     ReviewConflict(FileChange),
     ReviewConflictSide(FileChange, ConflictSide),
@@ -1503,6 +1506,87 @@ mod tests {
             }
             assert_eq!(app.summary, "Summary");
             assert_eq!(app.description, "Details");
+        }
+    }
+
+    fn multi_hunk_app(side: HunkSide) -> Desktop {
+        let mut app = hunk_app();
+        let mut review = (*app.hunk_review.take().unwrap()).clone();
+        review.side = side;
+        review.hunks = vec!["first".into(), "second".into(), "third".into()];
+        let _ = app.update(Message::HunksReviewed(Ok(review)));
+        app
+    }
+
+    #[test]
+    fn multi_hunk_selection_is_unique_and_only_the_matching_nonempty_action_consumes_review() {
+        for side in [HunkSide::Unstaged, HunkSide::Staged] {
+            let mut app = multi_hunk_app(side);
+            let _ = app.update(Message::ApplySelectedHunks(side));
+            assert!(!app.loading);
+            for index in [2, 0, 2, 99] {
+                let _ = app.update(Message::ToggleHunk(index, true));
+            }
+            assert_eq!(
+                app.selected_hunks.iter().copied().collect::<Vec<_>>(),
+                vec![0, 2]
+            );
+            let _ = app.update(Message::ToggleHunk(2, false));
+            assert_eq!(app.selected_hunks.len(), 1);
+            let wrong = if side == HunkSide::Staged {
+                HunkSide::Unstaged
+            } else {
+                HunkSide::Staged
+            };
+            let _ = app.update(Message::ApplySelectedHunks(wrong));
+            assert!(!app.loading);
+            assert!(app.hunk_review.is_some());
+            let _ = app.update(Message::ApplySelectedHunks(side));
+            assert!(app.loading);
+            assert!(app.hunk_review.is_none());
+            assert!(app.selected_hunks.is_empty());
+        }
+    }
+
+    #[test]
+    fn multi_hunk_busy_actions_and_failure_refresh_preserve_commit_drafts() {
+        let mut app = multi_hunk_app(HunkSide::Unstaged);
+        let _ = app.update(Message::ToggleHunk(0, true));
+        let _ = app.update(Message::ToggleHunk(2, true));
+        let _ = app.update(Message::ApplySelectedHunks(HunkSide::Unstaged));
+        assert!(app.loading);
+        let _ = app.update(Message::ToggleHunk(1, true));
+        let _ = app.update(Message::ApplySelectedHunks(HunkSide::Unstaged));
+        let _ = app.update(Message::CancelHunks);
+        assert!(app.selected_hunks.is_empty());
+        assert!(app.loading);
+        let _ = app.update(Message::Wrote(Operation::Index, Err("index locked".into())));
+        assert!(app.loading);
+        assert!(app.selected_hunks.is_empty());
+        let _ = app.update(Message::Refreshed(Err("refresh failed".into())));
+        assert!(!app.loading);
+        assert_eq!(app.summary, "Summary");
+        assert_eq!(app.description, "Details");
+    }
+
+    #[test]
+    fn hunk_review_replacement_navigation_and_single_actions_clear_multiple_selection() {
+        for action in 0..6 {
+            let mut app = multi_hunk_app(HunkSide::Unstaged);
+            let _ = app.update(Message::ToggleHunk(0, true));
+            let _ = app.update(Message::ToggleHunk(2, true));
+            let message = match action {
+                0 => Message::PanelSelected(Panel::Branches),
+                1 => Message::CancelHunks,
+                2 => Message::Refreshed(Err("refresh failed".into())),
+                3 => Message::HunksReviewed(Err("unsupported".into())),
+                4 => Message::StageHunk(1),
+                _ => Message::Select(app.hunk_review.as_ref().unwrap().change.clone()),
+            };
+            let _ = app.update(message);
+            assert!(app.selected_hunks.is_empty(), "{action}");
+            assert!(app.hunk_review.is_none());
+            assert_eq!(app.summary, "Summary");
         }
     }
 

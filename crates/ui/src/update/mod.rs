@@ -73,6 +73,12 @@ impl Desktop {
             Message::StageHunk(index) => {
                 self.update_changes(changes::Event::StageHunk(index, crate::HunkSide::Unstaged))
             }
+            Message::ToggleHunk(index, selected) => {
+                self.update_changes(changes::Event::ToggleHunk(index, selected))
+            }
+            Message::ApplySelectedHunks(side) => {
+                self.update_changes(changes::Event::ApplySelectedHunks(side))
+            }
             Message::CancelHunks => self.update_changes(changes::Event::CancelHunks),
             Message::DiffLoaded(result) => self.update_changes(changes::Event::DiffLoaded(result)),
             Message::ReviewConflict(change) => {
